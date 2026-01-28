@@ -37,6 +37,10 @@ class SasRead:
         with open(path_file, 'rb') as f:
             return f.read()
         
+    def _read_byte(self, offset: int, length: int, align1: int = 0, align2: int = 0) -> bytes:
+        res = self.byte_file[offset + align1:offset + length + align2]
+        return res
+        
     def _read_metadata(self):
         #Определяем кодировку файла
         encode = ord(self.byte_file[encoding_offset:encoding_offset + encoding_length])
@@ -45,23 +49,23 @@ class SasRead:
         else:
             raise ValueError('Ошиибка в определении кодировки файла')
         
-        buf = self.byte_file[endianness_offset: endianness_offset+endianness_length]
+        buf = self._read_byte(endianness_offset, endianness_length)
         if buf == b"\x01":
             fmt = '<%s' % 'd'
-            align1 = align_1_value
+            align = align_1_value
             self.header_metadata.need_byteswap = sys.byteorder
         else:
             fmt = '>%s' % 'd'
-            align1 = 0
+            align = 0
             self.header_metadata.need_byteswap = sys.byteorder
         
         #Дата создания таблицы
-        val = self.byte_file[date_created_offset+align1: date_created_offset+date_created_length+align1]
+        val = self._read_byte(date_created_offset, date_created_length, align1=align, align2=align)
         val = struct.unpack(str(fmt), val)[0]
         self.header_metadata.date_created = epoch + timedelta(seconds=val)
 
         #Дата обновления таблицы
-        val = self.byte_file[date_modified_offset+align1: date_modified_offset+date_modified_length+align1]
+        val = self._read_byte(date_modified_offset, date_modified_length, align1=align, align2=align)
         val = struct.unpack(str(fmt), val)[0]
         self.header_metadata.date_modified = epoch + timedelta(seconds=val)
 

@@ -15,6 +15,12 @@ date_created_length: Final = 8
 date_modified_offset: Final = 172
 date_modified_length: Final = 8
 
+rle_compression: Final = b'SASYZCRL'
+rrdc_compression: Final = b'SASYZCR2'
+
+compression_literals = [rle_compression, rrdc_compression]
+
+
 
 encoding_names: Final = {
     20: "utf-8",
