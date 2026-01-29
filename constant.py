@@ -1,7 +1,6 @@
 from typing import Final
 from datetime import datetime
 
-
 epoch = datetime(1960, 1, 1)
 
 
@@ -9,17 +8,28 @@ endianness_offset: Final = 37
 endianness_length: Final = 1
 encoding_offset: Final = 70
 encoding_length: Final = 1
+
+sas_version_offset: Final = 216
+sas_version_length: Final = 8
+
+align_1_checker_value: Final = b"3"
+align_1_offset: Final = 32
+align_1_length: Final = 1
 align_1_value: Final = 4
+u64_byte_checker_value: Final = b"3"
+align_2_offset: Final = 35
+align_2_length: Final = 1
+align_2_value: Final = 4
+
 date_created_offset: Final = 164
 date_created_length: Final = 8
 date_modified_offset: Final = 172
 date_modified_length: Final = 8
 
-rle_compression: Final = b'SASYZCRL'
-rrdc_compression: Final = b'SASYZCR2'
+rle_compression: Final = b"SASYZCRL"
+rrdc_compression: Final = b"SASYZCR2"
 
 compression_literals = [rle_compression, rrdc_compression]
-
 
 
 encoding_names: Final = {

@@ -2,17 +2,18 @@ import sys
 import struct
 
 from dataclasses import dataclass
-from typing import Optional 
+from typing import Optional
 from constant import *
 from datetime import datetime, timedelta
 
 
 @dataclass
 class HeaderMetadata:
-    encoding: str = 'utf-8'
+    encoding: str = "utf-8"
     need_byteswap: str | None = None
     date_created: str | None = None
     date_modified: str | None = None
+    sas_version: str | None = None
 
     def __repr__(self):
         return f"""----------------------------------------------
@@ -20,6 +21,7 @@ class HeaderMetadata:
         need_byteswap: {self.need_byteswap}
         date_created: {self.date_created}
         date_modified: {self.date_modified}
+        sas_version: {self.sas_version}     
         """
 
 
@@ -28,53 +30,83 @@ class SasRead:
         self.byte_order = None
         self.need_byteswap = None
 
+        self.aling1: int = 0
+        self.aling2: int = 0
+
+        self.u64: bool = False
+
         self.byte_file = self._open_file(path_file=path_file)
         self.header_metadata = HeaderMetadata()
+
+        # Фрматы для метода struct
+        self.s = "{}s"
+        self.d = ""
+
         self._read_metadata()
-        
 
     def _open_file(self, path_file: str) -> bytes:
-        with open(path_file, 'rb') as f:
+        with open(path_file, "rb") as f:
             return f.read()
-        
-    def _read_byte(self, offset: int, length: int, align1: int = 0, align2: int = 0) -> bytes:
-        res = self.byte_file[offset + align1:offset + length + align2]
+
+    def _read_byte(
+        self, offset: int, length: int = 0, align1: int = 0, align2: int = 0
+    ) -> bytes:
+        res = self.byte_file[offset + align1 : offset + length + align2]
         return res
-        
+
     def _read_metadata(self):
-        #Определяем кодировку файла
-        encode = ord(self.byte_file[encoding_offset:encoding_offset + encoding_length])
+        # Определяем кодировку файла
+        encode = ord(
+            self.byte_file[encoding_offset : encoding_offset + encoding_length]
+        )
         if encode in encoding_names:
             self.header_metadata.encoding = encoding_names[encode]
         else:
-            raise ValueError('Ошиибка в определении кодировки файла')
-        
+            raise ValueError("Ошиибка в определении кодировки файла")
+
         buf = self._read_byte(endianness_offset, endianness_length)
         if buf == b"\x01":
-            fmt = '<%s' % 'd'
+            self.d = "<%s" % "d"
             align = align_1_value
             self.header_metadata.need_byteswap = sys.byteorder
         else:
-            fmt = '>%s' % 'd'
+            self.d = ">%s" % "d"
             align = 0
             self.header_metadata.need_byteswap = sys.byteorder
-        
-        #Дата создания таблицы
-        val = self._read_byte(date_created_offset, date_created_length, align1=align, align2=align)
-        val = struct.unpack(str(fmt), val)[0]
+
+        # Дата создания таблицы
+        val = self._read_byte(
+            date_created_offset, date_created_length, align1=align, align2=align
+        )
+        val = struct.unpack(str(self.d), val)[0]
         self.header_metadata.date_created = epoch + timedelta(seconds=val)
 
-        #Дата обновления таблицы
-        val = self._read_byte(date_modified_offset, date_modified_length, align1=align, align2=align)
-        val = struct.unpack(str(fmt), val)[0]
+        # Дата обновления таблицы
+        val = self._read_byte(
+            date_modified_offset, date_modified_length, align1=align, align2=align
+        )
+        val = struct.unpack(str(self.d), val)[0]
         self.header_metadata.date_modified = epoch + timedelta(seconds=val)
 
+        if self._read_byte(align_2_offset, 1) == u64_byte_checker_value:
+            self.aling2 = align_2_value
+            self.u64 = True
+
+        if self._read_byte(align_1_offset, 1) == align_1_checker_value:
+            self.aling1 = align_1_value
+
+        # Определяю версию SAS
+        val = self._read_byte(
+            sas_version_offset + self.aling1 + self.aling2, sas_version_length
+        ).strip(b"\x00")
+        self.header_metadata.sas_version = struct.unpack(self.s.format(8), val)[
+            0
+        ].decode()
 
     def header(self):
         return self.header_metadata
-        
 
-s = SasRead(path_file='test.sas7bdat')
+
+s = SasRead(path_file="test.sas7bdat")
 
 print(s.header())
-    
