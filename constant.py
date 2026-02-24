@@ -3,6 +3,24 @@ from datetime import datetime
 
 epoch = datetime(1960, 1, 1)
 
+page_bit_offset_x86: Final = 16
+page_bit_offset_x64: Final = 32
+
+page_type_offset: Final = 0
+page_type_length: Final = 2
+#Типы страниц
+page_meta_type: Final = 0x0000
+page_data_type: Final = 0x0100
+page_mix_type: Final = 0x0200
+page_amd_type: Final = 0x0400
+page_meta2_type: Final = 0x4000
+page_comp_type: Final = 0x9000
+page_meta_types: Final = [page_meta_type, page_meta2_type]
+
+page_size_offset: Final = 200
+page_size_length: Final = 4
+page_count_offset: Final = 204
+page_count_length: Final = 4
 
 endianness_offset: Final = 37
 endianness_length: Final = 1

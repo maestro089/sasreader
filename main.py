@@ -1,3 +1,4 @@
+#https://github.com/BioStatMatt/sas7bdat/blob/master/vignettes/sas7bdat.rst#sas7bdat-header
 import sys
 import struct
 
@@ -14,6 +15,8 @@ class HeaderMetadata:
     date_created: str | None = None
     date_modified: str | None = None
     sas_version: str | None = None
+    page_size: int | None = None
+    page_count: int | None = None
 
     def __repr__(self):
         return f"""----------------------------------------------
@@ -21,7 +24,8 @@ class HeaderMetadata:
         need_byteswap: {self.need_byteswap}
         date_created: {self.date_created}
         date_modified: {self.date_modified}
-        sas_version: {self.sas_version}     
+        sas_version: {self.sas_version}   
+        page_size: {self.page_size}     
         """
 
 
@@ -29,6 +33,7 @@ class SasRead:
     def __init__(self, path_file: str):
         self.byte_order = None
         self.need_byteswap = None
+        self.page_bit_offset = None
 
         self.aling1: int = 0
         self.aling2: int = 0
@@ -42,7 +47,19 @@ class SasRead:
         self.s = "{}s"
         self.d = ""
 
+        self._init_setup()
         self._read_metadata()
+
+    def _init_setup(self):
+        if self._read_byte(align_2_offset, 1) == u64_byte_checker_value:
+            self.aling2 = align_2_value
+            self.u64 = True
+
+        if self._read_byte(align_1_offset, 1) == align_1_checker_value:
+            self.aling1 = align_1_value
+
+        self.page_bit_offset = page_bit_offset_x86 if self.u64 else page_bit_offset_x64
+
 
     def _open_file(self, path_file: str) -> bytes:
         with open(path_file, "rb") as f:
@@ -88,13 +105,6 @@ class SasRead:
         val = struct.unpack(str(self.d), val)[0]
         self.header_metadata.date_modified = epoch + timedelta(seconds=val)
 
-        if self._read_byte(align_2_offset, 1) == u64_byte_checker_value:
-            self.aling2 = align_2_value
-            self.u64 = True
-
-        if self._read_byte(align_1_offset, 1) == align_1_checker_value:
-            self.aling1 = align_1_value
-
         # Определяю версию SAS
         val = self._read_byte(
             sas_version_offset + self.aling1 + self.aling2, sas_version_length
@@ -102,6 +112,14 @@ class SasRead:
         self.header_metadata.sas_version = struct.unpack(self.s.format(8), val)[
             0
         ].decode()
+
+        # Определяем длинну страниц
+        page_size = self._read_byte(page_size_offset + self.aling1, page_size_length)
+        self.header_metadata.page_size = struct.unpack("i", page_size)[0]
+
+        # Определяем количество страниц
+        page_count = self._read_byte(page_count_offset + self.aling1, page_count_length + self.aling1)
+        self.header_metadata.page_count = struct.unpack("i", page_count)[0]
 
     def header(self):
         return self.header_metadata
