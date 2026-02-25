@@ -6,9 +6,15 @@ epoch = datetime(1960, 1, 1)
 page_bit_offset_x86: Final = 16
 page_bit_offset_x64: Final = 32
 
+subheader_pointer_length_x86 = 12
+subheader_pointer_length_x64 = 24
+
 page_type_offset: Final = 0
 page_type_length: Final = 2
-#Типы страниц
+
+row_length_offset_multiplier: Final = 5
+subheader_pointers_offset: Final = 8
+# Типы страниц
 page_meta_type: Final = 0x0000
 page_data_type: Final = 0x0100
 page_mix_type: Final = 0x0200
@@ -48,7 +54,6 @@ rle_compression: Final = b"SASYZCRL"
 rrdc_compression: Final = b"SASYZCR2"
 
 compression_literals = [rle_compression, rrdc_compression]
-
 
 encoding_names: Final = {
     20: "utf-8",

@@ -35,8 +35,8 @@ class SasRead:
         self.need_byteswap = None
         self.page_bit_offset = None
 
-        self.aling1: int = 0
-        self.aling2: int = 0
+        self.align1: int = 0
+        self.align2: int = 0
 
         self.u64: bool = False
 
@@ -51,25 +51,42 @@ class SasRead:
         self._read_metadata()
 
     def _init_setup(self):
-        if self._read_byte(align_2_offset, 1) == u64_byte_checker_value:
-            self.aling2 = align_2_value
+        if self._read_byte(align_1_offset, 1) == u64_byte_checker_value:
+            print("u64")
+            self.align2 = align_2_value
             self.u64 = True
 
-        if self._read_byte(align_1_offset, 1) == align_1_checker_value:
-            self.aling1 = align_1_value
+        if self._read_byte(align_2_offset, 1) == align_1_checker_value:
+            self.align1 = align_1_value
 
-        self.page_bit_offset = page_bit_offset_x86 if self.u64 else page_bit_offset_x64
+        self.page_bit_offset = page_bit_offset_x64 if self.u64 else page_bit_offset_x86
 
+        self.subheader_pointer_length = subheader_pointer_length_x64 if self.u64 else subheader_pointer_length_x86
 
-    def _open_file(self, path_file: str) -> bytes:
+        self.int_length = 8 if self.u64 else 4
+
+    @staticmethod
+    def _open_file(path_file: str) -> bytes:
         with open(path_file, "rb") as f:
             return f.read()
 
     def _read_byte(
         self, offset: int, length: int = 0, align1: int = 0, align2: int = 0
     ) -> bytes:
-        res = self.byte_file[offset + align1 : offset + length + align2]
+        res = self.byte_file[offset + align1: offset + length + align2]
         return res
+
+    def _process_subheader_pointers(self, offset, subheader_pointer_index):
+        subheader_pointer_length = self.subheader_pointer_length
+        total_offset = (
+            offset + subheader_pointer_length * subheader_pointer_index
+        )
+
+        res = self._read_byte(total_offset, self.int_length)
+
+        print(res)
+        print(struct.unpack("i", res)[0])
+
 
     def _read_metadata(self):
         # Определяем кодировку файла
@@ -107,24 +124,59 @@ class SasRead:
 
         # Определяю версию SAS
         val = self._read_byte(
-            sas_version_offset + self.aling1 + self.aling2, sas_version_length
+            sas_version_offset + self.align1 + self.align2, sas_version_length
         ).strip(b"\x00")
         self.header_metadata.sas_version = struct.unpack(self.s.format(8), val)[
             0
         ].decode()
 
         # Определяем длинну страниц
-        page_size = self._read_byte(page_size_offset + self.aling1, page_size_length)
+        page_size = self._read_byte(page_size_offset + self.align1, page_size_length)
         self.header_metadata.page_size = struct.unpack("i", page_size)[0]
 
         # Определяем количество страниц
-        page_count = self._read_byte(page_count_offset + self.aling1, page_count_length + self.aling1)
+        page_count = self._read_byte(page_count_offset + self.align1, page_count_length)
         self.header_metadata.page_count = struct.unpack("i", page_count)[0]
+
+        row_count = self._read_byte(460 + row_length_offset_multiplier + self.int_length, self.int_length)
+
+        self._process_subheader_pointers(subheader_pointers_offset + self.page_bit_offset, 0)
+
+    def read_lines(self):
+        pass
 
     def header(self):
         return self.header_metadata
 
 
-s = SasRead(path_file="test.sas7bdat")
+s = SasRead(path_file="gss2024.sas7bdat")
 
 print(s.header())
+
+# Header:
+# 	col_count_p1: 813
+# 	col_count_p2: 0
+# 	column_count: 813
+# 	compression: SASYZCRL
+# 	creator: None
+# 	creator_proc: DATASTEP
+# 	date_created: 2025-11-10 22:00:27.372000
+# 	date_modified: 2025-11-10 22:00:27.372000
+# 	endianess: little
+# 	file_type: DATA
+# 	filename: gss2024.sas7bdat
+# 	header_length: 65536
+# 	lcp: 8
+# 	lcs: 0
+# 	mix_page_row_count: 3
+# 	name:
+# 	os_name:
+# 	os_type:
+# 	page_count: 140
+# 	page_length: 65536
+# 	platform: windows
+# 	row_count: 3309
+# 	row_length: 3308
+# 	sas_release: 9.0401M7
+# 	server_type: X64_SRV19
+# 	u64: False
