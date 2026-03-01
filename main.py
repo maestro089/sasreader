@@ -1,4 +1,4 @@
-#https://github.com/BioStatMatt/sas7bdat/blob/master/vignettes/sas7bdat.rst#sas7bdat-header
+# https://github.com/BioStatMatt/sas7bdat/blob/master/vignettes/sas7bdat.rst#sas7bdat-header
 import sys
 import struct
 
@@ -17,6 +17,9 @@ class HeaderMetadata:
     sas_version: str | None = None
     page_size: int | None = None
     page_count: int | None = None
+    platform: str | None = "unknown"
+    name: str | None = None
+    file_type: str | None = None
 
     def __repr__(self):
         return f"""----------------------------------------------
@@ -25,18 +28,19 @@ class HeaderMetadata:
         date_created: {self.date_created}
         date_modified: {self.date_modified}
         sas_version: {self.sas_version}   
-        page_size: {self.page_size}     
+        page_size: {self.page_size}   
+        platform: {self.platform}  
+        file_type: {self.file_type}
         """
 
 
 class SasHeader(object):
-    def __init__(self, parent):
+    def __init__(self, parent: "SasRead"):
         self.parent = parent
 
         self.header_metadata = HeaderMetadata()
 
         self.s = "{}s"
-        self.d = ""
 
         self.align1: int = 0
         self.align2: int = 0
@@ -47,19 +51,52 @@ class SasHeader(object):
         self._read_metadata()
 
     def _init_setup(self):
-        if self.parent._read_byte(align_1_offset, 1) == u64_byte_checker_value:
-            print("u64")
+        if self._read_byte(align_1_offset, 1) == u64_byte_checker_value:
             self.align2 = align_2_value
             self.u64 = True
 
-        if self.parent._read_byte(align_2_offset, 1) == align_1_checker_value:
+        if self._read_byte(align_2_offset, 1) == align_1_checker_value:
             self.align1 = align_1_value
 
         self.page_bit_offset = page_bit_offset_x64 if self.u64 else page_bit_offset_x86
 
-        self.subheader_pointer_length = subheader_pointer_length_x64 if self.u64 else subheader_pointer_length_x86
+        self.subheader_pointer_length = (
+            subheader_pointer_length_x64 if self.u64 else subheader_pointer_length_x86
+        )
 
         self.int_length = 8 if self.u64 else 4
+
+    def _read_byte(
+        self,
+        offset: int,
+        length: int = 0,
+        align1: int = 0,
+        align2: int = 0,
+        fmt: str = None,
+    ) -> bytes | float | int:
+        res = self.parent.byte_file[offset + align1 : offset + length + align2]
+
+        _fmt = fmt
+
+        if fmt == "i" and self.u64:
+            _fmt = "q"
+        elif fmt == "s":
+            _fmt = "{}s".format(min(length, len(res)))
+
+        if self.header_metadata.need_byteswap == "little":
+            _fmt = "<{}".format(_fmt)
+        elif self.header_metadata.need_byteswap == "big":
+            _fmt = ">{}".format(_fmt)
+
+        if fmt == "d":
+            res = struct.unpack(str(_fmt), res)[0]
+        elif fmt == "s":
+            val = res.strip(b"\x00").strip()
+            res = struct.unpack(_fmt, val)[0].decode()
+        elif fmt == "i":
+            res = struct.unpack(_fmt, res)[0]
+
+        return res
 
     def _read_metadata(self):
         # Определяем кодировку файла
@@ -71,55 +108,56 @@ class SasHeader(object):
         else:
             raise ValueError("Ошиибка в определении кодировки файла")
 
-        buf = self.parent._read_byte(endianness_offset, endianness_length)
+        buf = self._read_byte(endianness_offset, endianness_length)
         if buf == b"\x01":
-            self.d = "<%s" % "d"
             align = align_1_value
             self.header_metadata.need_byteswap = sys.byteorder
         else:
-            self.d = ">%s" % "d"
             align = 0
             self.header_metadata.need_byteswap = sys.byteorder
 
         # Дата создания таблицы
-        val = self.parent._read_byte(
-            date_created_offset, date_created_length, align1=align, align2=align
+        val = self._read_byte(
+            date_created_offset,
+            date_created_length,
+            align1=align,
+            align2=align,
+            fmt="d",
         )
-        val = struct.unpack(str(self.d), val)[0]
         self.header_metadata.date_created = epoch + timedelta(seconds=val)
 
         # Дата обновления таблицы
-        val = self.parent._read_byte(
-            date_modified_offset, date_modified_length, align1=align, align2=align
+        val = self._read_byte(
+            date_modified_offset,
+            date_modified_length,
+            align1=align,
+            align2=align,
+            fmt="d",
         )
-        val = struct.unpack(str(self.d), val)[0]
         self.header_metadata.date_modified = epoch + timedelta(seconds=val)
 
         # Определяю версию SAS
-        val = self.parent._read_byte(
-            sas_version_offset + self.align1 + self.align2, sas_version_length
-        ).strip(b"\x00")
-        self.header_metadata.sas_version = struct.unpack(self.s.format(8), val)[
-            0
-        ].decode()
+        val = self._read_byte(
+            sas_version_offset + self.align1 + self.align2, sas_version_length, fmt="s"
+        )
+        self.header_metadata.sas_version = val
+
+        # Определяем платформу
+        val = self._read_byte(platform_offset, platform_length)
+        if val == b"1":
+            self.header_metadata.platform = "Windows"
+        elif val == b"2":
+            self.header_metadata.platform = "Linux"
+        elif val == b"3":
+            self.header_metadata.platform = "MacOS"
 
         # Определяем длинну страниц
-        page_size = self.parent._read_byte(page_size_offset + self.align1, page_size_length)
-        self.header_metadata.page_size = struct.unpack("i", page_size)[0]
+        page_size = self._read_byte(page_size_offset + self.align1, page_size_length, fmt="i")
+        self.header_metadata.page_size = page_size
 
         # Определяем количество страниц
-        page_count = self.parent._read_byte(page_count_offset + self.align1, page_count_length)
-        self.header_metadata.page_count = struct.unpack("i", page_count)[0]
-
-        row_count = self.parent._read_byte(460 + row_length_offset_multiplier + self.int_length, self.int_length)
-
-        # self.parent._process_subheader_pointers(subheader_pointers_offset + self.page_bit_offset, 0)
-
-    def read_lines(self):
-        pass
-
-    def header(self):
-        return "123"
+        page_count = self._read_byte(page_count_offset + self.align1, page_count_length, fmt="i")
+        self.header_metadata.page_count = page_count
 
 
 class SasRead:
@@ -138,31 +176,13 @@ class SasRead:
         self.sas_header = SasHeader(self)
         self.header_metadata = self.sas_header.header_metadata
 
-
     @staticmethod
     def _open_file(path_file: str) -> bytes:
         with open(path_file, "rb") as f:
             return f.read()
 
-    def _read_byte(
-        self, offset: int, length: int = 0, align1: int = 0, align2: int = 0
-    ) -> bytes:
-        res = self.byte_file[offset + align1: offset + length + align2]
-        return res
-
     def header(self):
         return self.header_metadata
-
-    # def _process_subheader_pointers(self, offset, subheader_pointer_index):
-    #     subheader_pointer_length = self.subheader_pointer_length
-    #     total_offset = (
-    #         offset + subheader_pointer_length * subheader_pointer_index
-    #     )
-    #
-    #     res = self._read_byte(total_offset, self.int_length)
-    #
-    #     print(res)
-    #     print(struct.unpack("i", res)[0])
 
 
 s = SasRead(path_file="gss2024.sas7bdat")

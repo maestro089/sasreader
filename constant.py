@@ -12,6 +12,11 @@ subheader_pointer_length_x64 = 24
 page_type_offset: Final = 0
 page_type_length: Final = 2
 
+dataset_offset: Final = 92
+dataset_length: Final = 64
+file_type_offset: Final = 156
+file_type_length: Final = 8
+
 row_length_offset_multiplier: Final = 5
 subheader_pointers_offset: Final = 8
 # Типы страниц
@@ -35,6 +40,9 @@ encoding_length: Final = 1
 
 sas_version_offset: Final = 216
 sas_version_length: Final = 8
+
+platform_offset: Final = 39
+platform_length: Final = 1
 
 align_1_checker_value: Final = b"3"
 align_1_offset: Final = 32
