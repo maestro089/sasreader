@@ -16,10 +16,13 @@ class HeaderMetadata:
     date_modified: str | None = None
     sas_version: str | None = None
     page_size: int | None = None
+    header_length: int | None = None
     page_count: int | None = None
     platform: str | None = "unknown"
     name: str | None = None
     file_type: str | None = None
+    page_bit_offset: int | None = None
+    subheader_pointer_length: int | None = None
 
     def __repr__(self):
         return f"""----------------------------------------------
@@ -28,7 +31,9 @@ class HeaderMetadata:
         date_created: {self.date_created}
         date_modified: {self.date_modified}
         sas_version: {self.sas_version}   
+        page_count: {self.page_count}
         page_size: {self.page_size}   
+        header_length: {self.header_length}
         platform: {self.platform}  
         file_type: {self.file_type}
         """
@@ -58,9 +63,11 @@ class SasHeader(object):
         if self._read_byte(align_2_offset, 1) == align_1_checker_value:
             self.align1 = align_1_value
 
-        self.page_bit_offset = page_bit_offset_x64 if self.u64 else page_bit_offset_x86
+        self.header_metadata.page_bit_offset = (
+            page_bit_offset_x64 if self.u64 else page_bit_offset_x86
+        )
 
-        self.subheader_pointer_length = (
+        self.header_metadata.subheader_pointer_length = (
             subheader_pointer_length_x64 if self.u64 else subheader_pointer_length_x86
         )
 
@@ -74,7 +81,7 @@ class SasHeader(object):
         align2: int = 0,
         fmt: str = None,
     ) -> bytes | float | int:
-        res = self.parent.byte_file[offset + align1: offset + length + align2]
+        res = self.parent.byte_file[offset + align1 : offset + length + align2]
 
         _fmt = fmt
 
@@ -91,11 +98,10 @@ class SasHeader(object):
         if fmt == "d":
             res = struct.unpack(str(_fmt), res)[0]
         elif fmt == "s":
-            val = res.strip(b"\x00").strip()
+            val = res.strip(b"\x00")
             res = struct.unpack(_fmt, val)[0].decode()
         elif fmt == "i":
             res = struct.unpack(_fmt, res)[0]
-
         return res
 
     def _read_metadata(self):
@@ -151,13 +157,26 @@ class SasHeader(object):
         elif val == b"3":
             self.header_metadata.platform = "MacOS"
 
+        # Определяем тип файла
+        val = self._read_byte(file_type_offset, file_type_length, fmt="s")
+        self.header_metadata.file_type = val
+
         # Определяем длинну страниц
-        page_size = self._read_byte(page_size_offset + self.align1, page_size_length, fmt="i")
+        page_size = self._read_byte(
+            page_size_offset + self.align1, page_size_length, fmt="i"
+        )
         self.header_metadata.page_size = page_size
 
         # Определяем количество страниц
-        page_count = self._read_byte(page_count_offset + self.align1, page_count_length, fmt="i")
+        page_count = self._read_byte(
+            page_count_offset + self.align1, page_count_length, fmt="i"
+        )
         self.header_metadata.page_count = page_count
+
+        header_length = self._read_byte(
+            header_size_offset + self.align1, header_size_length, fmt="i"
+        )
+        self.header_metadata.header_length = header_length
 
 
 class SasRead:
@@ -180,6 +199,12 @@ class SasRead:
     def _open_file(path_file: str) -> bytes:
         with open(path_file, "rb") as f:
             return f.read()
+
+    def readline(self):
+        bit_offset = self.header_metadata.page_bit_offset
+        subheader_pointer_length = self.header_metadata.subheader_pointer_length
+
+        return self.byte_file
 
     def header(self):
         return self.header_metadata

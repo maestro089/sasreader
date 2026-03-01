@@ -6,6 +6,8 @@ epoch = datetime(1960, 1, 1)
 page_bit_offset_x86: Final = 16
 page_bit_offset_x64: Final = 32
 
+header_size_offset: Final = 196
+header_size_length: Final = 4
 subheader_pointer_length_x86 = 12
 subheader_pointer_length_x64 = 24
 
