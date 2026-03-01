@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 @dataclass
 class HeaderMetadata:
     encoding: str = "utf-8"
-    need_byteswap: str | None = None
+    need_bytes: str | None = None
     date_created: str | None = None
     date_modified: str | None = None
     sas_version: str | None = None
@@ -24,7 +24,7 @@ class HeaderMetadata:
     def __repr__(self):
         return f"""----------------------------------------------
         encoding: {self.encoding}
-        need_byteswap: {self.need_byteswap}
+        need_byteswap: {self.need_bytes}
         date_created: {self.date_created}
         date_modified: {self.date_modified}
         sas_version: {self.sas_version}   
@@ -74,7 +74,7 @@ class SasHeader(object):
         align2: int = 0,
         fmt: str = None,
     ) -> bytes | float | int:
-        res = self.parent.byte_file[offset + align1 : offset + length + align2]
+        res = self.parent.byte_file[offset + align1: offset + length + align2]
 
         _fmt = fmt
 
@@ -83,9 +83,9 @@ class SasHeader(object):
         elif fmt == "s":
             _fmt = "{}s".format(min(length, len(res)))
 
-        if self.header_metadata.need_byteswap == "little":
+        if self.header_metadata.need_bytes == "little":
             _fmt = "<{}".format(_fmt)
-        elif self.header_metadata.need_byteswap == "big":
+        elif self.header_metadata.need_bytes == "big":
             _fmt = ">{}".format(_fmt)
 
         if fmt == "d":
@@ -111,10 +111,10 @@ class SasHeader(object):
         buf = self._read_byte(endianness_offset, endianness_length)
         if buf == b"\x01":
             align = align_1_value
-            self.header_metadata.need_byteswap = sys.byteorder
+            self.header_metadata.need_bytes = sys.byteorder
         else:
             align = 0
-            self.header_metadata.need_byteswap = sys.byteorder
+            self.header_metadata.need_bytes = sys.byteorder
 
         # Дата создания таблицы
         val = self._read_byte(
