@@ -9,6 +9,22 @@ from datetime import datetime, timedelta
 
 
 @dataclass
+class SubheaderPointer:
+    offset: int = None
+    length: int = None
+    compression: int = None
+    type: int = None
+
+
+@dataclass
+class PageMetadata:
+    byte_meta: bytes = None
+    page_type: int | None = None
+    page_block_count: int | None = None
+    page_subheader_count: int | None = None
+
+
+@dataclass
 class HeaderMetadata:
     encoding: str = "utf-8"
     need_bytes: str | None = None
@@ -42,10 +58,9 @@ class HeaderMetadata:
 class SasHeader(object):
     def __init__(self, parent: "SasRead"):
         self.parent = parent
+        self.page_metadata = PageMetadata()
 
         self.header_metadata = HeaderMetadata()
-
-        self.s = "{}s"
 
         self.align1: int = 0
         self.align2: int = 0
@@ -101,6 +116,8 @@ class SasHeader(object):
             val = res.strip(b"\x00")
             res = struct.unpack(_fmt, val)[0].decode()
         elif fmt == "i":
+            res = struct.unpack(_fmt, res)[0]
+        elif fmt == "h":
             res = struct.unpack(_fmt, res)[0]
         return res
 
@@ -178,6 +195,73 @@ class SasHeader(object):
         )
         self.header_metadata.header_length = header_length
 
+    def parse_header(self):
+        self._read_metadata()
+        # for page in range(1, self.header_metadata.page_count):
+        for page in range(1, 5):
+            self._read_page(page=page)
+
+    def _read_page(self, page: int) -> None:
+        self._read_page_header(page=page)
+        if self.page_metadata.page_type in page_meta_mix_data:
+            self._read_page_metadata()
+
+    def _read_subheader_pointer(self, offset: int, index: int) -> SubheaderPointer:
+
+        total_offset = offset + self.header_metadata.subheader_pointer_length * index
+
+        subheader_offset = self._read_byte(
+            total_offset, self.int_length, fmt="i"
+        )
+
+        subheader_length = self._read_byte(
+            total_offset + self.int_length, self.int_length, fmt="i"
+        )
+
+        subheader_compression = self._read_byte(
+            total_offset + self.int_length * 2, fmt="b"
+        )
+
+        subheader_type = self._read_byte(
+            total_offset + self.int_length * 2 + 1, fmt="b"
+        )
+
+        return SubheaderPointer(subheader_offset, subheader_length, subheader_compression, subheader_type)
+
+    def _read_page_metadata(self) -> None:
+        for i in range(self.page_metadata.page_subheader_count):
+            pointer = self._read_subheader_pointer(
+                subheader_pointers_offset + self.header_metadata.page_bit_offset,
+                i,
+            )
+            if not pointer.length:
+                print(pointer)
+
+    def _read_page_header(self, page: int) -> None:
+        self.page_metadata.page_type = self._read_byte(
+            self.header_metadata.page_size * page
+            + page_type_offset
+            + self.header_metadata.page_bit_offset,
+            page_type_length,
+            fmt="h",
+        )
+
+        self.page_metadata.page_block_count = self._read_byte(
+            self.header_metadata.page_size * page
+            + block_count_offset
+            + self.header_metadata.page_bit_offset,
+            block_count_length,
+            fmt="h",
+        )
+
+        self.page_metadata.page_subheader_count = self._read_byte(
+            self.header_metadata.page_size * page
+            + subheader_count_offset
+            + self.header_metadata.page_bit_offset,
+            subheader_count_length,
+            fmt="h",
+        )
+
 
 class SasRead:
     def __init__(self, path_file: str):
@@ -194,6 +278,7 @@ class SasRead:
 
         self.sas_header = SasHeader(self)
         self.header_metadata = self.sas_header.header_metadata
+        self.sas_header.parse_header()
 
     @staticmethod
     def _open_file(path_file: str) -> bytes:

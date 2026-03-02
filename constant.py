@@ -13,6 +13,11 @@ subheader_pointer_length_x64 = 24
 
 page_type_offset: Final = 0
 page_type_length: Final = 2
+block_count_offset: Final = 2
+block_count_length: Final = 2
+subheader_count_offset: Final = 4
+subheader_count_length: Final = 2
+
 
 dataset_offset: Final = 92
 dataset_length: Final = 64
@@ -22,13 +27,19 @@ file_type_length: Final = 8
 row_length_offset_multiplier: Final = 5
 subheader_pointers_offset: Final = 8
 # Типы страниц
-page_meta_type: Final = 0x0000
-page_data_type: Final = 0x0100
-page_mix_type: Final = 0x0200
-page_amd_type: Final = 0x0400
-page_meta2_type: Final = 0x4000
-page_comp_type: Final = 0x9000
-page_meta_types: Final = [page_meta_type, page_meta2_type]
+page_meta_type: Final = 0
+page_data_type: Final = 256
+page_mix_type: Final = 512
+page_amd_type: Final = 1024
+page_meta2_type: Final = 16384
+page_comp_type: Final = -28672
+
+page_meta_mix_data: Final = [
+    page_meta_type,
+    page_meta2_type,
+    page_data_type,
+    page_mix_type,
+]
 
 page_size_offset: Final = 200
 page_size_length: Final = 4
