@@ -22,6 +22,7 @@ class PageMetadata:
     page_type: int | None = None
     page_block_count: int | None = None
     page_subheader_count: int | None = None
+    page_cache: bytes | None = None
 
 
 @dataclass
@@ -39,6 +40,7 @@ class HeaderMetadata:
     file_type: str | None = None
     page_bit_offset: int | None = None
     subheader_pointer_length: int | None = None
+    compression: int | None = None
 
     def __repr__(self):
         return f"""----------------------------------------------
@@ -95,8 +97,12 @@ class SasHeader(object):
         align1: int = 0,
         align2: int = 0,
         fmt: str = None,
+        byte_cache: bytes = None,
     ) -> bytes | float | int:
-        res = self.parent.byte_file[offset + align1 : offset + length + align2]
+        if not byte_cache:
+            res = self.parent.byte_file[offset + align1 : offset + length + align2]
+        else:
+            res = byte_cache[offset + align1 : offset + length + align2]
 
         _fmt = fmt
 
@@ -211,22 +217,42 @@ class SasHeader(object):
         total_offset = offset + self.header_metadata.subheader_pointer_length * index
 
         subheader_offset = self._read_byte(
-            total_offset, self.int_length, fmt="i"
+            total_offset,
+            self.int_length,
+            fmt="i",
+            byte_cache=self.page_metadata.page_cache,
         )
 
         subheader_length = self._read_byte(
-            total_offset + self.int_length, self.int_length, fmt="i"
+            total_offset + self.int_length,
+            self.int_length,
+            fmt="i",
+            byte_cache=self.page_metadata.page_cache,
         )
 
         subheader_compression = self._read_byte(
-            total_offset + self.int_length * 2, fmt="b"
+            total_offset + self.int_length * 2,
+            fmt="b",
+            byte_cache=self.page_metadata.page_cache,
         )
 
         subheader_type = self._read_byte(
-            total_offset + self.int_length * 2 + 1, fmt="b"
+            total_offset + self.int_length * 2 + 1,
+            fmt="b",
+            byte_cache=self.page_metadata.page_cache,
         )
 
-        return SubheaderPointer(subheader_offset, subheader_length, subheader_compression, subheader_type)
+        return SubheaderPointer(
+            subheader_offset, subheader_length, subheader_compression, subheader_type
+        )
+
+    def _get_subheader_class(self, signature, compression, type):
+        index = subheader_signature_to_index.get(signature)
+        if self.header_metadata.compression is not None and index is None and\
+                (compression == compressed_subheader_id or
+                 compression == 0) and type == compressed_subheader_id:
+            index = SASIndex.data_subheader_index
+        return index
 
     def _read_page_metadata(self) -> None:
         for i in range(self.page_metadata.page_subheader_count):
@@ -235,9 +261,25 @@ class SasHeader(object):
                 i,
             )
             if not pointer.length:
-                print(pointer)
+                continue
+
+            if pointer.compression != truncated_subheader_id:
+                subheader_signature = self._read_byte(pointer.offset, self.int_length, byte_cache=self.page_metadata.page_cache)
+
+                subheader_index = self._get_subheader_class(
+                    subheader_signature,
+                    pointer.compression,
+                    pointer.type
+                )
+
+                print(subheader_index)
 
     def _read_page_header(self, page: int) -> None:
+
+        self.page_metadata.page_cache = self._read_byte(
+            self.header_metadata.page_size * page, self.header_metadata.page_size
+        )
+
         self.page_metadata.page_type = self._read_byte(
             self.header_metadata.page_size * page
             + page_type_offset

@@ -26,6 +26,10 @@ file_type_length: Final = 8
 
 row_length_offset_multiplier: Final = 5
 subheader_pointers_offset: Final = 8
+truncated_subheader_id: Final = 1
+compressed_subheader_id: Final = 4
+compressed_subheader_type: Final = 1
+
 # Типы страниц
 page_meta_type: Final = 0
 page_data_type: Final = 256
@@ -75,6 +79,52 @@ rle_compression: Final = b"SASYZCRL"
 rrdc_compression: Final = b"SASYZCR2"
 
 compression_literals = [rle_compression, rrdc_compression]
+
+
+class SASIndex:
+    row_size_index: Final = 0
+    column_size_index: Final = 1
+    subheader_counts_index: Final = 2
+    column_text_index: Final = 3
+    column_name_index: Final = 4
+    column_attributes_index: Final = 5
+    format_and_label_index: Final = 6
+    column_list_index: Final = 7
+    data_subheader_index: Final = 8
+
+
+subheader_signature_to_index: Final = {
+    b"\xf7\xf7\xf7\xf7": SASIndex.row_size_index,
+    b"\x00\x00\x00\x00\xf7\xf7\xf7\xf7": SASIndex.row_size_index,
+    b"\xf7\xf7\xf7\xf7\x00\x00\x00\x00": SASIndex.row_size_index,
+    b"\xf7\xf7\xf7\xf7\xff\xff\xfb\xfe": SASIndex.row_size_index,
+    b"\xf6\xf6\xf6\xf6": SASIndex.column_size_index,
+    b"\x00\x00\x00\x00\xf6\xf6\xf6\xf6": SASIndex.column_size_index,
+    b"\xf6\xf6\xf6\xf6\x00\x00\x00\x00": SASIndex.column_size_index,
+    b"\xf6\xf6\xf6\xf6\xff\xff\xfb\xfe": SASIndex.column_size_index,
+    b"\x00\xfc\xff\xff": SASIndex.subheader_counts_index,
+    b"\xff\xff\xfc\x00": SASIndex.subheader_counts_index,
+    b"\x00\xfc\xff\xff\xff\xff\xff\xff": SASIndex.subheader_counts_index,
+    b"\xff\xff\xff\xff\xff\xff\xfc\x00": SASIndex.subheader_counts_index,
+    b"\xfd\xff\xff\xff": SASIndex.column_text_index,
+    b"\xff\xff\xff\xfd": SASIndex.column_text_index,
+    b"\xfd\xff\xff\xff\xff\xff\xff\xff": SASIndex.column_text_index,
+    b"\xff\xff\xff\xff\xff\xff\xff\xfd": SASIndex.column_text_index,
+    b"\xff\xff\xff\xff": SASIndex.column_name_index,
+    b"\xff\xff\xff\xff\xff\xff\xff\xff": SASIndex.column_name_index,
+    b"\xfc\xff\xff\xff": SASIndex.column_attributes_index,
+    b"\xff\xff\xff\xfc": SASIndex.column_attributes_index,
+    b"\xfc\xff\xff\xff\xff\xff\xff\xff": SASIndex.column_attributes_index,
+    b"\xff\xff\xff\xff\xff\xff\xff\xfc": SASIndex.column_attributes_index,
+    b"\xfe\xfb\xff\xff": SASIndex.format_and_label_index,
+    b"\xff\xff\xfb\xfe": SASIndex.format_and_label_index,
+    b"\xfe\xfb\xff\xff\xff\xff\xff\xff": SASIndex.format_and_label_index,
+    b"\xff\xff\xff\xff\xff\xff\xfb\xfe": SASIndex.format_and_label_index,
+    b"\xfe\xff\xff\xff": SASIndex.column_list_index,
+    b"\xff\xff\xff\xfe": SASIndex.column_list_index,
+    b"\xfe\xff\xff\xff\xff\xff\xff\xff": SASIndex.column_list_index,
+    b"\xff\xff\xff\xff\xff\xff\xff\xfe": SASIndex.column_list_index,
+}
 
 encoding_names: Final = {
     20: "utf-8",
