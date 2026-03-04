@@ -25,6 +25,10 @@ file_type_offset: Final = 156
 file_type_length: Final = 8
 
 row_length_offset_multiplier: Final = 5
+row_count_offset_multiplier: Final = 6
+col_count_p1_multiplier: Final = 9
+col_count_p2_multiplier: Final = 10
+row_count_on_mix_page_offset_multiplier: Final = 15
 subheader_pointers_offset: Final = 8
 truncated_subheader_id: Final = 1
 compressed_subheader_id: Final = 4
