@@ -48,6 +48,7 @@ class HeaderMetadata:
     mix_page_row_count: int | None = None
     lcs: int | None = None
     lcp: int | None = None
+    column_count: int | None = None
 
     def __repr__(self):
         return f"""----------------------------------------------
@@ -68,6 +69,7 @@ class HeaderMetadata:
         mix_page_row_count: {self.mix_page_row_count}  
         lcs: {self.lcs}
         lcp: {self.lcp}
+        column_count: {self.column_count}
         """
 
 
@@ -295,7 +297,13 @@ class SasHeader(object):
                     if subheader_index != SASIndex.data_subheader_index:
                         match subheader_index:
                             case SASIndex.row_size_index:
-                                self._row_size_subheader(pointer.offset, pointer.length)
+                                self._row_size_subheader(pointer.offset)
+                            case SASIndex.column_size_index:
+                                self._column_size_subheader(pointer.offset)
+                            case SASIndex.subheader_counts_index:
+                                pass
+                            case SASIndex.column_text_index:
+                                self._column_text_subheader(pointer.offset)
 
     def _read_page_header(self, page: int) -> None:
 
@@ -327,7 +335,7 @@ class SasHeader(object):
             fmt="h",
         )
 
-    def _row_size_subheader(self, offset, length) -> None:
+    def _row_size_subheader(self, offset) -> None:
         lcs = offset + (682 if self.u64 else 354)
         lcp = offset + (706 if self.u64 else 378)
 
@@ -371,6 +379,20 @@ class SasHeader(object):
         self.header_metadata.lcp = self._read_byte(
             lcp, 2, fmt="h", byte_cache=self.page_metadata.page_cache
         )
+
+    def _column_size_subheader(self, offset) -> None:
+        self.header_metadata.column_count = self._read_byte(
+            offset + self.int_length,
+            self.int_length,
+            fmt="i",
+            byte_cache=self.page_metadata.page_cache,
+        )
+
+        if self.header_metadata.col_count_p1 + self.header_metadata.col_count_p2 != self.header_metadata.column_count:
+            print("Error: col_count_p1 + col_count_p2 != column_count")
+
+    def _column_text_subheader(self, offset) -> None:
+        pass
 
 
 class SasRead:
