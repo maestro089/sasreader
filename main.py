@@ -309,7 +309,7 @@ class SasHeader(object):
                                 self._column_text_subheader(self.pointer.offset)
                             case SASIndex.column_name_index:
                                 self._column_name_subheader(
-                                    self.pointer.offset, self.pointer.length
+                                    self.pointer.offset
                                 )
 
     def _read_page_header(self, page: int) -> None:
@@ -415,15 +415,14 @@ class SasHeader(object):
             byte_cache=self.page_metadata.page_cache,
         )
 
-        self.parent.column_names_strings.append(vals)
-
-        if len(self.parent.column_names_strings) > 0:
+        if len(vals) > 0:
             for cl in compression_literals:
-                if cl in self.parent.column_names_strings:
+                if cl in vals:
                     self.header_metadata.compression = cl
                     break
+        self.parent.column_names_strings.append(vals)
 
-    def _column_name_subheader(self, offset, length) -> None:
+    def _column_name_subheader(self, offset) -> None:
 
         for i in range(self.header_metadata.col_count_p1):
             text_subheader = (
