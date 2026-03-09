@@ -33,6 +33,20 @@ subheader_pointers_offset: Final = 8
 truncated_subheader_id: Final = 1
 compressed_subheader_id: Final = 4
 compressed_subheader_type: Final = 1
+text_block_size_length: Final = 2
+
+rle_compression: Final = b"SASYZCRL"
+rdc_compression: Final = b"SASYZCR2"
+compression_literals: Final = [rle_compression, rdc_compression]
+
+column_name_pointer_length: Final = 8
+column_name_text_subheader_offset: Final = 0
+column_name_text_subheader_length: Final = 2
+column_name_offset_offset: Final = 2
+column_name_offset_length: Final = 2
+column_name_length_offset: Final = 4
+column_name_length_length: Final = 2
+
 
 # Типы страниц
 page_meta_type: Final = 0
@@ -82,7 +96,7 @@ date_modified_length: Final = 8
 rle_compression: Final = b"SASYZCRL"
 rrdc_compression: Final = b"SASYZCR2"
 
-compression_literals = [rle_compression, rrdc_compression]
+compression_literals: Final = [rle_compression, rrdc_compression]
 
 
 class SASIndex:

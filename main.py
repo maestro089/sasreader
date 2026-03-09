@@ -43,8 +43,8 @@ class HeaderMetadata:
     compression: int | None = None
     row_count: int | None = None
     row_length: int | None = None
-    col_count_p1: int | None = None
-    col_count_p2: int | None = None
+    col_count_p1: int = 0
+    col_count_p2: int = 0
     mix_page_row_count: int | None = None
     lcs: int | None = None
     lcp: int | None = None
@@ -70,6 +70,7 @@ class HeaderMetadata:
         lcs: {self.lcs}
         lcp: {self.lcp}
         column_count: {self.column_count}
+        compression: {self.compression}
         """
 
 
@@ -84,6 +85,8 @@ class SasHeader(object):
         self.align2: int = 0
 
         self.u64: bool = False
+
+        self.pointer = None
 
         self._init_setup()
         self._read_metadata()
@@ -275,35 +278,39 @@ class SasHeader(object):
 
     def _read_page_metadata(self) -> None:
         for i in range(self.page_metadata.page_subheader_count):
-            pointer = self._read_subheader_pointer(
+            self.pointer = self._read_subheader_pointer(
                 subheader_pointers_offset + self.header_metadata.page_bit_offset,
                 i,
             )
-            if not pointer.length:
+            if not self.pointer.length:
                 continue
 
-            if pointer.compression != truncated_subheader_id:
+            if self.pointer.compression != truncated_subheader_id:
                 subheader_signature = self._read_byte(
-                    pointer.offset,
+                    self.pointer.offset,
                     self.int_length,
                     byte_cache=self.page_metadata.page_cache,
                 )
 
                 subheader_index = self._get_subheader_class(
-                    subheader_signature, pointer.compression, pointer.type
+                    subheader_signature, self.pointer.compression, self.pointer.type
                 )
 
                 if subheader_index is not None:
                     if subheader_index != SASIndex.data_subheader_index:
                         match subheader_index:
                             case SASIndex.row_size_index:
-                                self._row_size_subheader(pointer.offset)
+                                self._row_size_subheader(self.pointer.offset)
                             case SASIndex.column_size_index:
-                                self._column_size_subheader(pointer.offset)
+                                self._column_size_subheader(self.pointer.offset)
                             case SASIndex.subheader_counts_index:
                                 pass
                             case SASIndex.column_text_index:
-                                self._column_text_subheader(pointer.offset)
+                                self._column_text_subheader(self.pointer.offset)
+                            case SASIndex.column_name_index:
+                                self._column_name_subheader(
+                                    self.pointer.offset, self.pointer.length
+                                )
 
     def _read_page_header(self, page: int) -> None:
 
@@ -388,11 +395,71 @@ class SasHeader(object):
             byte_cache=self.page_metadata.page_cache,
         )
 
-        if self.header_metadata.col_count_p1 + self.header_metadata.col_count_p2 != self.header_metadata.column_count:
+        if (
+            self.header_metadata.col_count_p1 + self.header_metadata.col_count_p2
+            != self.header_metadata.column_count
+        ):
             print("Error: col_count_p1 + col_count_p2 != column_count")
 
     def _column_text_subheader(self, offset) -> None:
-        pass
+        text_block_size = self._read_byte(
+            offset + self.int_length,
+            text_block_size_length,
+            fmt="h",
+            byte_cache=self.page_metadata.page_cache,
+        )
+
+        vals = self._read_byte(
+            offset + self.int_length,
+            text_block_size,
+            byte_cache=self.page_metadata.page_cache,
+        )
+
+        self.parent.column_names_strings.append(vals)
+
+        if len(self.parent.column_names_strings) > 0:
+            for cl in compression_literals:
+                if cl in self.parent.column_names_strings:
+                    self.header_metadata.compression = cl
+                    break
+
+    def _column_name_subheader(self, offset, length) -> None:
+
+        for i in range(self.header_metadata.col_count_p1):
+            text_subheader = (
+                offset + self.int_length
+                + column_name_pointer_length * (i + 1)
+                + column_name_text_subheader_offset
+            )
+            col_name_offset = (
+                offset + self.int_length
+                + column_name_pointer_length * (i + 1)
+                + column_name_offset_offset
+            )
+            col_name_length = (
+                offset + self.int_length
+                + column_name_pointer_length * (i + 1)
+                + column_name_length_offset
+            )
+
+            idx = self._read_byte(
+                text_subheader,
+                column_name_text_subheader_length,
+                fmt="h",
+                byte_cache=self.page_metadata.page_cache,
+            )
+            col_offset = self._read_byte(
+                col_name_offset,
+                column_name_offset_length, fmt="h",
+                byte_cache=self.page_metadata.page_cache,
+            )
+            col_len = self._read_byte(
+                col_name_length,
+                column_name_length_length, fmt="h",
+                byte_cache=self.page_metadata.page_cache,
+            )
+            name = self.parent.column_names_strings[idx]
+            self.parent.column_names.append(name[col_offset: col_offset + col_len])
 
 
 class SasRead:
@@ -403,6 +470,9 @@ class SasRead:
 
         self.align1: int = 0
         self.align2: int = 0
+
+        self.column_names_strings = []
+        self.column_names = []
 
         self.byte_file = self._open_file(path_file=path_file)
 
@@ -422,6 +492,7 @@ class SasRead:
         return self.byte_file
 
     def header(self):
+        print(self.column_names)
         return self.header_metadata
 
 
