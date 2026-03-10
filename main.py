@@ -144,6 +144,9 @@ class SasHeader(object):
             res = struct.unpack(_fmt, res)[0]
         elif fmt == "h":
             res = struct.unpack(_fmt, res)[0]
+        elif fmt == "b":
+            res = struct.unpack(_fmt, res)[0]
+
         return res
 
     def _read_metadata(self):
@@ -251,13 +254,11 @@ class SasHeader(object):
 
         subheader_compression = self._read_byte(
             total_offset + self.int_length * 2,
-            fmt="b",
             byte_cache=self.page_metadata.page_cache,
         )
 
         subheader_type = self._read_byte(
             total_offset + self.int_length * 2 + 1,
-            fmt="b",
             byte_cache=self.page_metadata.page_cache,
         )
 
@@ -310,6 +311,11 @@ class SasHeader(object):
                             case SASIndex.column_name_index:
                                 self._column_name_subheader(
                                     self.pointer.offset
+                                )
+                            case SASIndex.column_attributes_index:
+                                self._column_attributes_subheader(
+                                    self.pointer.offset,
+                                    self.pointer.length
                                 )
 
     def _read_page_header(self, page: int) -> None:
@@ -460,6 +466,40 @@ class SasHeader(object):
             name = self.parent.column_names_strings[idx]
             self.parent.column_names.append(name[col_offset: col_offset + col_len])
 
+    def _column_attributes_subheader(self, offset, length) -> None:
+        column_attributes_vectors_count = (
+                (length - 2 * self.int_length - 12) // (self.int_length + 8)
+        )
+
+        for i in range(column_attributes_vectors_count):
+            col_data_offset = (
+                    offset + self.int_length + column_data_offset_offset + i *
+                    (self.int_length + 8)
+            )
+            col_data_len = (
+                    offset + 2 * self.int_length + column_data_length_offset + i *
+                    (self.int_length + 8)
+            )
+            col_types = (
+                    offset + 2 * self.int_length + column_type_offset + i *
+                    (self.int_length + 8)
+            )
+
+            self.parent.column_data_offsets.append(self._read_byte(
+                col_data_offset, self.int_length, fmt='i', byte_cache=self.page_metadata.page_cache
+            ))
+
+            self.parent.column_data_lengths.append(self._read_byte(
+                col_data_len, column_data_length_length, fmt='i', byte_cache=self.page_metadata.page_cache
+            ))
+
+            ctype = self._read_byte(
+                col_types, column_type_length, fmt='b', byte_cache=self.page_metadata.page_cache
+            )
+            self.parent.column_types.append(
+                'number' if ctype == 1 else 'string'
+            )
+
 
 class SasRead:
     def __init__(self, path_file: str):
@@ -472,6 +512,9 @@ class SasRead:
 
         self.column_names_strings = []
         self.column_names = []
+        self.column_data_offsets = []
+        self.column_data_lengths = []
+        self.column_types = []
 
         self.byte_file = self._open_file(path_file=path_file)
 
@@ -491,7 +534,6 @@ class SasRead:
         return self.byte_file
 
     def header(self):
-        print(self.column_names)
         return self.header_metadata
 
 

@@ -46,6 +46,11 @@ column_name_offset_offset: Final = 2
 column_name_offset_length: Final = 2
 column_name_length_offset: Final = 4
 column_name_length_length: Final = 2
+column_data_offset_offset: Final = 8
+column_data_length_offset: Final = 8
+column_data_length_length: Final = 4
+column_type_offset: Final = 14
+column_type_length: Final = 1
 
 
 # Типы страниц
