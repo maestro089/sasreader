@@ -235,9 +235,9 @@ class SasHeader(object):
 
     def parse_header(self):
         self._read_metadata()
-        # for page in range(1, self.header_metadata.page_count):
-        for page in range(1, 5):
+        for page in range(1, self.header_metadata.page_count):
             self._read_page(page=page)
+        self.page_metadata.page_cache = None
 
     def _read_page(self, page: int) -> None:
         self._read_page_header(page=page)
@@ -605,6 +605,7 @@ class SasRead:
         self.byte_order = None
         self.need_byteswap = None
         self.page_bit_offset = None
+        self.cache_page = None
 
         self.align1: int = 0
         self.align2: int = 0
@@ -630,11 +631,18 @@ class SasRead:
     def readline(self):
         bit_offset = self.header_metadata.page_bit_offset
         subheader_pointer_length = self.header_metadata.subheader_pointer_length
+        row_count = self.header_metadata.row_count
+        current_row_in_file_index = 0
+        current_row_on_page_index = 0
 
-        return self.byte_file
+        if self.sas_header.page_metadata.page_cache is None:
+            self.sas_header._read_page_header(1)
+
+        return 0
 
     def header(self):
-        print(self.columns[0])
+        from pprint import pprint
+        pprint(self.columns)
         return self.header_metadata
 
 
