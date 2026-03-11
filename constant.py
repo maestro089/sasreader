@@ -51,6 +51,18 @@ column_data_length_offset: Final = 8
 column_data_length_length: Final = 4
 column_type_offset: Final = 14
 column_type_length: Final = 1
+column_format_text_subheader_index_offset: Final = 22
+column_format_text_subheader_index_length: Final = 2
+column_format_offset_offset: Final = 24
+column_format_offset_length: Final = 2
+column_format_length_offset: Final = 26
+column_format_length_length: Final = 2
+column_label_text_subheader_index_offset: Final = 28
+column_label_text_subheader_index_length: Final = 2
+column_label_offset_offset: Final = 30
+column_label_offset_length: Final = 2
+column_label_length_offset: Final = 32
+column_label_length_length: Final = 2
 
 
 # Типы страниц
@@ -97,11 +109,6 @@ date_created_offset: Final = 164
 date_created_length: Final = 8
 date_modified_offset: Final = 172
 date_modified_length: Final = 8
-
-rle_compression: Final = b"SASYZCRL"
-rrdc_compression: Final = b"SASYZCR2"
-
-compression_literals: Final = [rle_compression, rrdc_compression]
 
 
 class SASIndex:

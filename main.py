@@ -9,6 +9,16 @@ from datetime import datetime, timedelta
 
 
 @dataclass
+class Column:
+    col_id: int = None
+    name: str = None
+    label: str = None
+    format: str = None
+    length: int = None
+    type: int = None
+
+
+@dataclass
 class SubheaderPointer:
     offset: int = None
     length: int = None
@@ -309,14 +319,13 @@ class SasHeader(object):
                             case SASIndex.column_text_index:
                                 self._column_text_subheader(self.pointer.offset)
                             case SASIndex.column_name_index:
-                                self._column_name_subheader(
-                                    self.pointer.offset
-                                )
+                                self._column_name_subheader(self.pointer.offset)
                             case SASIndex.column_attributes_index:
                                 self._column_attributes_subheader(
-                                    self.pointer.offset,
-                                    self.pointer.length
+                                    self.pointer.offset, self.pointer.length
                                 )
+                            case SASIndex.format_and_label_index:
+                                self._format_and_label_subheader(self.pointer.offset)
 
     def _read_page_header(self, page: int) -> None:
 
@@ -432,17 +441,20 @@ class SasHeader(object):
 
         for i in range(self.header_metadata.col_count_p1):
             text_subheader = (
-                offset + self.int_length
+                offset
+                + self.int_length
                 + column_name_pointer_length * (i + 1)
                 + column_name_text_subheader_offset
             )
             col_name_offset = (
-                offset + self.int_length
+                offset
+                + self.int_length
                 + column_name_pointer_length * (i + 1)
                 + column_name_offset_offset
             )
             col_name_length = (
-                offset + self.int_length
+                offset
+                + self.int_length
                 + column_name_pointer_length * (i + 1)
                 + column_name_length_offset
             )
@@ -455,50 +467,137 @@ class SasHeader(object):
             )
             col_offset = self._read_byte(
                 col_name_offset,
-                column_name_offset_length, fmt="h",
+                column_name_offset_length,
+                fmt="h",
                 byte_cache=self.page_metadata.page_cache,
             )
             col_len = self._read_byte(
                 col_name_length,
-                column_name_length_length, fmt="h",
+                column_name_length_length,
+                fmt="h",
                 byte_cache=self.page_metadata.page_cache,
             )
             name = self.parent.column_names_strings[idx]
-            self.parent.column_names.append(name[col_offset: col_offset + col_len])
+            self.parent.column_names.append(name[col_offset : col_offset + col_len])
 
     def _column_attributes_subheader(self, offset, length) -> None:
-        column_attributes_vectors_count = (
-                (length - 2 * self.int_length - 12) // (self.int_length + 8)
+        column_attributes_vectors_count = (length - 2 * self.int_length - 12) // (
+            self.int_length + 8
         )
 
         for i in range(column_attributes_vectors_count):
             col_data_offset = (
-                    offset + self.int_length + column_data_offset_offset + i *
-                    (self.int_length + 8)
+                offset
+                + self.int_length
+                + column_data_offset_offset
+                + i * (self.int_length + 8)
             )
             col_data_len = (
-                    offset + 2 * self.int_length + column_data_length_offset + i *
-                    (self.int_length + 8)
+                offset
+                + 2 * self.int_length
+                + column_data_length_offset
+                + i * (self.int_length + 8)
             )
             col_types = (
-                    offset + 2 * self.int_length + column_type_offset + i *
-                    (self.int_length + 8)
+                offset
+                + 2 * self.int_length
+                + column_type_offset
+                + i * (self.int_length + 8)
             )
 
-            self.parent.column_data_offsets.append(self._read_byte(
-                col_data_offset, self.int_length, fmt='i', byte_cache=self.page_metadata.page_cache
-            ))
+            self.parent.column_data_offsets.append(
+                self._read_byte(
+                    col_data_offset,
+                    self.int_length,
+                    fmt="i",
+                    byte_cache=self.page_metadata.page_cache,
+                )
+            )
 
-            self.parent.column_data_lengths.append(self._read_byte(
-                col_data_len, column_data_length_length, fmt='i', byte_cache=self.page_metadata.page_cache
-            ))
+            self.parent.column_data_lengths.append(
+                self._read_byte(
+                    col_data_len,
+                    column_data_length_length,
+                    fmt="i",
+                    byte_cache=self.page_metadata.page_cache,
+                )
+            )
 
             ctype = self._read_byte(
-                col_types, column_type_length, fmt='b', byte_cache=self.page_metadata.page_cache
+                col_types,
+                column_type_length,
+                fmt="b",
+                byte_cache=self.page_metadata.page_cache,
             )
-            self.parent.column_types.append(
-                'number' if ctype == 1 else 'string'
+            self.parent.column_types.append("number" if ctype == 1 else "string")
+
+    def _format_and_label_subheader(self, offset) -> None:
+
+        text_subheader_format = self._read_byte(
+            offset + column_format_text_subheader_index_offset + 3 * self.int_length,
+            column_format_text_subheader_index_length,
+            fmt="h",
+            byte_cache=self.page_metadata.page_cache,
+        )
+
+        format_idx = min(
+            text_subheader_format, len(self.parent.column_names_strings) - 1
+        )
+
+        format_start = self._read_byte(
+            offset + column_format_offset_offset + 3 * self.int_length,
+            column_format_offset_length,
+            fmt="h",
+            byte_cache=self.page_metadata.page_cache,
+        )
+
+        format_len = self._read_byte(
+            offset + column_format_length_offset + 3 * self.int_length,
+            column_format_length_length,
+            fmt="h",
+            byte_cache=self.page_metadata.page_cache,
+        )
+
+        text_subheader_label = self._read_byte(
+            offset + column_label_text_subheader_index_offset + 3 * self.int_length,
+            column_label_text_subheader_index_length,
+            fmt="h",
+            byte_cache=self.page_metadata.page_cache,
+        )
+
+        label_idx = min(text_subheader_label, len(self.parent.column_names_strings) - 1)
+
+        label_start = self._read_byte(
+            offset + column_label_offset_offset + 3 * self.int_length,
+            column_label_offset_length,
+            fmt="h",
+            byte_cache=self.page_metadata.page_cache,
+        )
+
+        label_len = self._read_byte(
+            offset + column_label_length_offset + 3 * self.int_length,
+            column_label_length_length,
+            fmt="h",
+            byte_cache=self.page_metadata.page_cache,
+        )
+
+        label_names = self.parent.column_names_strings[label_idx]
+        column_label = label_names[label_start : label_start + label_len]
+        format_names = self.parent.column_names_strings[format_idx]
+        column_format = format_names[format_start : format_start + format_len]
+
+        current_column_number = len(self.parent.columns)
+
+        self.parent.columns.append(
+            Column(
+                col_id=current_column_number,
+                name=self.parent.column_names[current_column_number],
+                label=column_label,
+                format=column_format,
+                type=self.parent.column_types[current_column_number],
+                length=self.parent.column_data_lengths[current_column_number],
             )
+        )
 
 
 class SasRead:
@@ -515,6 +614,7 @@ class SasRead:
         self.column_data_offsets = []
         self.column_data_lengths = []
         self.column_types = []
+        self.columns = []
 
         self.byte_file = self._open_file(path_file=path_file)
 
@@ -534,6 +634,7 @@ class SasRead:
         return self.byte_file
 
     def header(self):
+        print(self.columns[0])
         return self.header_metadata
 
 
