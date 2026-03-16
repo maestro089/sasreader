@@ -129,7 +129,7 @@ class SasHeader(object):
         byte_cache: bytes = None,
     ) -> bytes | float | int:
         if not byte_cache:
-            res = self.parent.byte_file[offset + align1 : offset + length + align2]
+            res = self.parent.byte_file[offset + align1: offset + length + align2]
         else:
             res = byte_cache[offset + align1 : offset + length + align2]
 
@@ -240,7 +240,7 @@ class SasHeader(object):
         self.page_metadata.page_cache = None
 
     def _read_page(self, page: int) -> None:
-        self._read_page_header(page=page)
+        self.read_page_header(page=page)
         if self.page_metadata.page_type in page_meta_mix_data:
             self._read_page_metadata()
 
@@ -263,12 +263,14 @@ class SasHeader(object):
         )
 
         subheader_compression = self._read_byte(
-            total_offset + self.int_length * 2,
-            byte_cache=self.page_metadata.page_cache,
+            total_offset + self.int_length * 2, 1,
+            fmt="b",
+            byte_cache=self.page_metadata.page_cache
         )
 
         subheader_type = self._read_byte(
-            total_offset + self.int_length * 2 + 1,
+            total_offset + self.int_length * 2 + 1, 1,
+            fmt="b",
             byte_cache=self.page_metadata.page_cache,
         )
 
@@ -282,7 +284,7 @@ class SasHeader(object):
             self.header_metadata.compression is not None
             and index is None
             and (compression == compressed_subheader_id or compression == 0)
-            and type == compressed_subheader_id
+            and type == compressed_subheader_type
         ):
             index = SASIndex.data_subheader_index
         return index
@@ -307,6 +309,7 @@ class SasHeader(object):
                     subheader_signature, self.pointer.compression, self.pointer.type
                 )
 
+
                 if subheader_index is not None:
                     if subheader_index != SASIndex.data_subheader_index:
                         match subheader_index:
@@ -326,8 +329,12 @@ class SasHeader(object):
                                 )
                             case SASIndex.format_and_label_index:
                                 self._format_and_label_subheader(self.pointer.offset)
+                    else:
+                        self.parent.current_page_data_subheader_pointers.append(
+                            self.pointer
+                        )
 
-    def _read_page_header(self, page: int) -> None:
+    def read_page_header(self, page: int) -> None:
 
         self.page_metadata.page_cache = self._read_byte(
             self.header_metadata.page_size * page, self.header_metadata.page_size
@@ -610,6 +617,7 @@ class SasRead:
         self.align1: int = 0
         self.align2: int = 0
 
+        self.current_page_data_subheader_pointers = []
         self.column_names_strings = []
         self.column_names = []
         self.column_data_offsets = []
@@ -636,19 +644,25 @@ class SasRead:
         current_row_on_page_index = 0
 
         if self.sas_header.page_metadata.page_cache is None:
-            self.sas_header._read_page_header(1)
-
+            self.sas_header.read_page_header(1)
+            
+        for i in range(row_count):
+            if self.sas_header.page_metadata.page_type == page_meta_type:
+                try:
+                    current_subheader_pointer = self.current_page_data_subheader_pointers[i]
+                except IndexError:
+                    self.sas_header.read_page_header(1)
         return 0
 
     def header(self):
-        from pprint import pprint
-        pprint(self.columns)
+        # from pprint import pprint
+        # pprint(self.columns)
         return self.header_metadata
 
 
 s = SasRead(path_file="gss2024.sas7bdat")
 
-print(s.header())
+print(s.readline())
 
 # Header:
 # 	col_count_p1: 813
