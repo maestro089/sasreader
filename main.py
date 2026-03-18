@@ -86,6 +86,9 @@ class HeaderMetadata:
 
 class SasHeader(object):
     def __init__(self, parent: "SasRead"):
+
+        self.test = []
+
         self.parent = parent
         self.page_metadata = PageMetadata()
 
@@ -237,7 +240,6 @@ class SasHeader(object):
         self._read_metadata()
         for page in range(1, self.header_metadata.page_count):
             self._read_page(page=page)
-        self.page_metadata.page_cache = None
 
     def _read_page(self, page: int) -> None:
         self.read_page_header(page=page)
@@ -308,7 +310,6 @@ class SasHeader(object):
                 subheader_index = self._get_subheader_class(
                     subheader_signature, self.pointer.compression, self.pointer.type
                 )
-
 
                 if subheader_index is not None:
                     if subheader_index != SASIndex.data_subheader_index:
@@ -642,17 +643,6 @@ class SasRead:
         row_count = self.header_metadata.row_count
         current_row_in_file_index = 0
         current_row_on_page_index = 0
-
-        if self.sas_header.page_metadata.page_cache is None:
-            self.sas_header.read_page_header(1)
-            
-        for i in range(row_count):
-            if self.sas_header.page_metadata.page_type == page_meta_type:
-                try:
-                    current_subheader_pointer = self.current_page_data_subheader_pointers[i]
-                except IndexError:
-                    self.sas_header.read_page_header(1)
-        return 0
 
     def header(self):
         # from pprint import pprint
