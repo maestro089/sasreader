@@ -20,6 +20,7 @@ class SASProperties:
     page_count = None
     sas_version = None
     header_size = None
+    page_bit_offset = page_bit_offset_x86
 
     def __str__(self):
         return f"""
@@ -35,6 +36,7 @@ class SASProperties:
                 page_count: {self.page_count}
                 sas_version: {self.sas_version}
                 header_size(HL): {self.header_size}
+                page_bit_offset: {self.page_bit_offset}
                """
 
 
@@ -82,10 +84,10 @@ class ConvertByte:
         return result
 
 
-class SasHeader:
-    def __init__(self, byte_file):
+class SasReadHeaderFile:
+    def __init__(self, byte_file, properties: SASProperties):
         self._byte_file = byte_file
-        self.properties = SASProperties()
+        self.properties = properties
         self._read_byte = ConvertByte(properties=self.properties)
 
         self._check_magic(self._byte_file[0:288])
@@ -102,6 +104,7 @@ class SasHeader:
         if self._read_byte.read(align_1_offset, 1, cache=cache) == u64_byte_checker_value:
             self.properties.align2 = align_2_value
             self.properties.u64 = True
+            self.properties.page_bit_offset = page_bit_offset_x64
         if self._read_byte.read(align_2_offset, 1, cache=cache) == align_1_checker_value:
             self.properties.align1 = align_1_value
 
@@ -134,13 +137,40 @@ class SasHeader:
         self.properties.header_size = val
 
 
+class SasReadMetaPage:
+
+    @dataclass
+    class MetaPage:
+        type = None
+
+    def __init__(self, byte_file, properties: SASProperties):
+        self._byte_file = byte_file
+        self.properties = properties
+        self._read_byte = ConvertByte(properties=self.properties)
+
+        self._metadata_pages = []
+
+        self._parse_metadata()
+
+    def _parse_metadata(self):
+        cache = self._read_byte.read(self.properties.page_size, self.properties.page_size, cache=self._byte_file)
+        page_bit_offset = self.properties.page_bit_offset
+        for i in range(self.properties.page_count):
+            meta_page = self.MetaPage()
+            val = self._read_byte.read(page_type_offset + page_bit_offset, page_type_length, cache=cache, fmt="h")
+            meta_page.type = pgtype[val]
+            self._metadata_pages.append(meta_page)
+            del meta_page
+
 
 class SasReader:
     def __init__(self, path: str):
         self.path = path
+        self.metadata_file = SASProperties()
 
         self._byte_file = self._read_sas7bdat(path=self.path)
-        self.header = SasHeader(byte_file=self._byte_file)
+        self.header = SasReadHeaderFile(byte_file=self._byte_file, properties=self.metadata_file)
+        SasReadMetaPage(byte_file=self._byte_file, properties=self.metadata_file)
 
     @staticmethod
     def _read_sas7bdat(path: str):

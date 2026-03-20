@@ -80,6 +80,15 @@ page_meta_mix_data: Final = [
     page_mix_type,
 ]
 
+pgtype: Final = {
+    page_meta_type: "META",
+    page_data_type: "DATA",
+    page_mix_type: "MIX",
+    page_amd_type: "AMD",
+    page_meta2_type: "META2",
+    page_comp_type: "COMP",
+}
+
 page_size_offset: Final = 200
 page_size_length: Final = 4
 page_count_offset: Final = 204
