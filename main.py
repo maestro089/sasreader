@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import timedelta
 
 from constant import *
 
@@ -10,17 +11,38 @@ class SASProperties:
     align1 = 0
     align2 = 0
     u64 = False
-    need_bytes = "little"
+    endianness = None
+    platform = None
+    encode = 'utf-8'
+    date_created = None
+    date_modified = None
+    page_size = None
+    page_count = None
+    sas_version = None
+    header_size = None
 
     def __str__(self):
-        return f"align1: {self.align1}, align2: {self.align2}, u64: {self.u64}"
+        return f"""
+                align1: {self.align1}
+                align2: {self.align2}
+                u64: {self.u64}
+                endianness: {self.endianness}
+                platform: {self.platform}
+                encode: {self.encode}
+                date_created: {self.date_created}
+                date_modified: {self.date_modified}
+                page_size(PL): {self.page_size}
+                page_count: {self.page_count}
+                sas_version: {self.sas_version}
+                header_size(HL): {self.header_size}
+               """
 
 
 class ConvertByte:
     def __init__(self, properties: SASProperties):
         self._properties = properties
 
-    def _read(
+    def read(
         self,
         offset: int,
         length: int = 0,
@@ -39,9 +61,9 @@ class ConvertByte:
         elif fmt == "s":
             _fmt = "{}s".format(min(length, len(res_cache)))
 
-        if self._properties.need_bytes == "little":
+        if self._properties.endianness == "little":
             _fmt = "<{}".format(_fmt)
-        elif self._properties.need_bytes == "big":
+        elif self._properties.endianness == "big":
             _fmt = ">{}".format(_fmt)
 
         if fmt == "d":
@@ -64,26 +86,53 @@ class SasHeader:
     def __init__(self, byte_file):
         self._byte_file = byte_file
         self.properties = SASProperties()
+        self._read_byte = ConvertByte(properties=self.properties)
 
         self._check_magic(self._byte_file[0:288])
         self._check_u64(self._byte_file[0:64])
-
-        self._read_byte = ConvertByte(properties=self.properties)
+        self._parse_metadata(self._byte_file)
 
     @staticmethod
     def _check_magic(cache: bytes = None):
-        if cache[0: len(magic_number)] == magic_number:
-            ...
-        else:
+        if cache[0: len(magic_number)] != magic_number:
             print(cache[0: len(magic_number)])
             raise Exception("magic number is not ok")
 
     def _check_u64(self, cache: bytes = None):
-        if cache[align_1_offset: align_1_offset + 1] == u64_byte_checker_value:
+        if self._read_byte.read(align_1_offset, 1, cache=cache) == u64_byte_checker_value:
             self.properties.align2 = align_2_value
             self.properties.u64 = True
-        if cache[align_2_offset: align_2_offset + 1] == align_1_checker_value:
+        if self._read_byte.read(align_2_offset, 1, cache=cache) == align_1_checker_value:
             self.properties.align1 = align_1_value
+
+    def _parse_metadata(self, cache: bytes = None):
+        val = self._read_byte.read(endianness_offset, endianness_length, cache=cache)
+        self.properties.endianness = "little" if val == b"\x01" else "big"
+
+        val = self._read_byte.read(platform_offset, platform_length, cache=cache)
+        self.properties.platform = "WIN" if val == b"2" else "UNIX"
+
+        val = self._read_byte.read(encoding_offset, encoding_length, cache=cache, fmt="b")
+        self.properties.encode = encoding_names[val]
+
+        val = self._read_byte.read(date_created_offset + self.properties.align1, date_created_length, cache=cache, fmt="d")
+        self.properties.date_created = epoch + timedelta(seconds=val)
+
+        val = self._read_byte.read(date_modified_offset + self.properties.align1, date_modified_length, cache=cache, fmt="d")
+        self.properties.date_modified = epoch + timedelta(seconds=val)
+
+        val = self._read_byte.read(page_size_offset + self.properties.align1, page_size_length, cache=cache, fmt="i")
+        self.properties.page_size = val
+
+        val = self._read_byte.read(page_count_offset + self.properties.align1, page_count_length, cache=cache, fmt="i")
+        self.properties.page_count = val
+
+        val = self._read_byte.read(sas_version_offset + self.properties.align1 + self.properties.align2, sas_version_length, cache=cache)
+        self.properties.sas_version = val
+
+        val = self._read_byte.read(header_size_offset + self.properties.align1, header_size_length, cache=cache, fmt="i")
+        self.properties.header_size = val
+
 
 
 class SasReader:
