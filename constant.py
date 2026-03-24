@@ -68,10 +68,12 @@ column_label_length_length: Final = 2
 # Типы страниц
 page_meta_type: Final = 0
 page_data_type: Final = 256
-page_mix_type: Final = 512
+page_mix_type: Final = [512, 640]
 page_amd_type: Final = 1024
 page_meta2_type: Final = 16384
 page_comp_type: Final = -28672
+
+page_meta_mix_amd: Final = [page_meta_type, page_amd_type] + page_mix_type
 
 page_meta_mix_data: Final = [
     page_meta_type,
@@ -79,15 +81,6 @@ page_meta_mix_data: Final = [
     page_data_type,
     page_mix_type,
 ]
-
-pgtype: Final = {
-    page_meta_type: "META",
-    page_data_type: "DATA",
-    page_mix_type: "MIX",
-    page_amd_type: "AMD",
-    page_meta2_type: "META2",
-    page_comp_type: "COMP",
-}
 
 page_size_offset: Final = 200
 page_size_length: Final = 4

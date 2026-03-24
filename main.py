@@ -13,7 +13,7 @@ class SASProperties:
     u64 = False
     endianness = None
     platform = None
-    encode = 'utf-8'
+    encode = "utf-8"
     date_created = None
     date_modified = None
     page_size = None
@@ -54,7 +54,7 @@ class ConvertByte:
         cache: bytes = None,
     ) -> bytes | float | int:
 
-        res_cache = cache[offset + align1: offset + length + align2]
+        res_cache = cache[offset + align1 : offset + length + align2]
 
         _fmt = fmt
 
@@ -96,16 +96,22 @@ class SasReadHeaderFile:
 
     @staticmethod
     def _check_magic(cache: bytes = None):
-        if cache[0: len(magic_number)] != magic_number:
-            print(cache[0: len(magic_number)])
+        if cache[0 : len(magic_number)] != magic_number:
+            print(cache[0 : len(magic_number)])
             raise Exception("magic number is not ok")
 
     def _check_u64(self, cache: bytes = None):
-        if self._read_byte.read(align_1_offset, 1, cache=cache) == u64_byte_checker_value:
+        if (
+            self._read_byte.read(align_1_offset, 1, cache=cache)
+            == u64_byte_checker_value
+        ):
             self.properties.align2 = align_2_value
             self.properties.u64 = True
             self.properties.page_bit_offset = page_bit_offset_x64
-        if self._read_byte.read(align_2_offset, 1, cache=cache) == align_1_checker_value:
+        if (
+            self._read_byte.read(align_2_offset, 1, cache=cache)
+            == align_1_checker_value
+        ):
             self.properties.align1 = align_1_value
 
     def _parse_metadata(self, cache: bytes = None):
@@ -115,52 +121,162 @@ class SasReadHeaderFile:
         val = self._read_byte.read(platform_offset, platform_length, cache=cache)
         self.properties.platform = "WIN" if val == b"2" else "UNIX"
 
-        val = self._read_byte.read(encoding_offset, encoding_length, cache=cache, fmt="b")
+        val = self._read_byte.read(
+            encoding_offset, encoding_length, cache=cache, fmt="b"
+        )
         self.properties.encode = encoding_names[val]
 
-        val = self._read_byte.read(date_created_offset + self.properties.align1, date_created_length, cache=cache, fmt="d")
+        val = self._read_byte.read(
+            date_created_offset + self.properties.align1,
+            date_created_length,
+            cache=cache,
+            fmt="d",
+        )
         self.properties.date_created = epoch + timedelta(seconds=val)
 
-        val = self._read_byte.read(date_modified_offset + self.properties.align1, date_modified_length, cache=cache, fmt="d")
+        val = self._read_byte.read(
+            date_modified_offset + self.properties.align1,
+            date_modified_length,
+            cache=cache,
+            fmt="d",
+        )
         self.properties.date_modified = epoch + timedelta(seconds=val)
 
-        val = self._read_byte.read(page_size_offset + self.properties.align1, page_size_length, cache=cache, fmt="i")
+        val = self._read_byte.read(
+            page_size_offset + self.properties.align1,
+            page_size_length,
+            cache=cache,
+            fmt="i",
+        )
         self.properties.page_size = val
 
-        val = self._read_byte.read(page_count_offset + self.properties.align1, page_count_length, cache=cache, fmt="i")
+        val = self._read_byte.read(
+            page_count_offset + self.properties.align1,
+            page_count_length,
+            cache=cache,
+            fmt="i",
+        )
         self.properties.page_count = val
 
-        val = self._read_byte.read(sas_version_offset + self.properties.align1 + self.properties.align2, sas_version_length, cache=cache)
+        val = self._read_byte.read(
+            sas_version_offset + self.properties.align1 + self.properties.align2,
+            sas_version_length,
+            cache=cache,
+        )
         self.properties.sas_version = val
 
-        val = self._read_byte.read(header_size_offset + self.properties.align1, header_size_length, cache=cache, fmt="i")
+        val = self._read_byte.read(
+            header_size_offset + self.properties.align1,
+            header_size_length,
+            cache=cache,
+            fmt="i",
+        )
         self.properties.header_size = val
 
 
+@dataclass
+class PointerPage:
+    offset: int = None
+    length: int = None
+    compression: str = None
+    type: str = None
+
+
+@dataclass
+class MetaPage:
+    page_type = None
+    page_block_count = None
+    page_subheaders_count = None
+    point: PointerPage = None
+
+
 class SasReadMetaPage:
-
-    @dataclass
-    class MetaPage:
-        type = None
-
     def __init__(self, byte_file, properties: SASProperties):
         self._byte_file = byte_file
         self.properties = properties
+        self._length = None
+        self._subheader_pointer_length = None
+        self._page_bit_offset = self.properties.page_bit_offset
+        self._check_u64()
         self._read_byte = ConvertByte(properties=self.properties)
 
         self._metadata_pages = []
-
+        self._meta_page = MetaPage()
+        self._meta_page_pointer = PointerPage()
+        self._cache = None
         self._parse_metadata()
 
+    def _check_u64(self):
+        self._length = 8 if self.properties.u64 else 4
+        self._subheader_pointer_length = (
+            subheader_pointer_length_x64
+            if self.properties.u64
+            else subheader_pointer_length_x86
+        )
+
+    def _read_meta_page(self):
+        self._meta_page.page_type = self._read_byte.read(
+            page_type_offset + self._page_bit_offset,
+            page_type_length,
+            cache=self._cache,
+            fmt="h",
+        )
+        self._meta_page.page_block_count = self._read_byte.read(
+            block_count_offset + self._page_bit_offset,
+            block_count_length,
+            cache=self._cache,
+            fmt="h",
+        )
+        self._meta_page.page_subheaders_count = self._read_byte.read(
+            subheader_count_offset + self._page_bit_offset,
+            subheader_count_length,
+            cache=self._cache,
+            fmt="h",
+        )
+
+    def _get_pointer_page(self, index: int = None):
+        total_offset = (
+            subheader_pointers_offset
+            + self._page_bit_offset
+            + (self._subheader_pointer_length * index)
+        )
+
+        self._meta_page_pointer.offset = self._read_byte.read(
+            total_offset, self._length, cache=self._cache, fmt="i"
+        )
+
+        self._meta_page_pointer.length = self._read_byte.read(
+            total_offset + self._length, self._length, cache=self._cache, fmt="i"
+        )
+
+        self._meta_page_pointer.compression = self._read_byte.read(
+            total_offset + self._length * 2, 1, cache=self._cache, fmt="b"
+        )
+
+        self._meta_page_pointer.type = self._read_byte.read(
+            total_offset + self._length * 2 + 1, 1, cache=self._cache, fmt="b"
+        )
+
+        self._meta_page.point = self._meta_page_pointer
+        print(self._meta_page)
+
+    def _process_meta_page(self):
+        for i in range(self._meta_page.page_subheaders_count):
+            pointer = self._get_pointer_page(index=i)
+
+    def _start_meta_page(self):
+        self._read_meta_page()
+        if self._meta_page.page_type in page_meta_mix_amd:
+            self._process_meta_page()
+
     def _parse_metadata(self):
-        cache = self._read_byte.read(self.properties.page_size, self.properties.page_size, cache=self._byte_file)
-        page_bit_offset = self.properties.page_bit_offset
         for i in range(self.properties.page_count):
-            meta_page = self.MetaPage()
-            val = self._read_byte.read(page_type_offset + page_bit_offset, page_type_length, cache=cache, fmt="h")
-            meta_page.type = pgtype[val]
-            self._metadata_pages.append(meta_page)
-            del meta_page
+            self._cache = self._read_byte.read(
+                self.properties.page_size * i,
+                self.properties.page_size,
+                cache=self._byte_file,
+            )
+            self._start_meta_page()
 
 
 class SasReader:
@@ -169,7 +285,9 @@ class SasReader:
         self.metadata_file = SASProperties()
 
         self._byte_file = self._read_sas7bdat(path=self.path)
-        self.header = SasReadHeaderFile(byte_file=self._byte_file, properties=self.metadata_file)
+        self.header = SasReadHeaderFile(
+            byte_file=self._byte_file, properties=self.metadata_file
+        )
         SasReadMetaPage(byte_file=self._byte_file, properties=self.metadata_file)
 
     @staticmethod
