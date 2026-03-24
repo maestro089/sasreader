@@ -187,7 +187,6 @@ class MetaPage:
     page_type = None
     page_block_count = None
     page_subheaders_count = None
-    point: PointerPage = None
 
 
 class SasReadMetaPage:
@@ -256,9 +255,6 @@ class SasReadMetaPage:
         self._meta_page_pointer.type = self._read_byte.read(
             total_offset + self._length * 2 + 1, 1, cache=self._cache, fmt="b"
         )
-
-        self._meta_page.point = self._meta_page_pointer
-        print(self._meta_page)
 
     def _process_meta_page(self):
         for i in range(self._meta_page.page_subheaders_count):
