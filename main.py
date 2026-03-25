@@ -21,6 +21,7 @@ class SASProperties:
     sas_version = None
     header_size = None
     page_bit_offset = page_bit_offset_x86
+    compression = None
 
     def __str__(self):
         return f"""
@@ -37,6 +38,7 @@ class SASProperties:
                 sas_version: {self.sas_version}
                 header_size(HL): {self.header_size}
                 page_bit_offset: {self.page_bit_offset}
+                compression: {self.compression}
                """
 
 
@@ -256,9 +258,35 @@ class SasReadMetaPage:
             total_offset + self._length * 2 + 1, 1, cache=self._cache, fmt="b"
         )
 
+        return self._meta_page_pointer
+
+    def _get_subheader_class(self, signature, compression, type):
+        index = subheader_signature_to_index.get(signature)
+        if (
+                self.properties.compression is not None
+                and index is None
+                and (compression == compressed_subheader_id or compression == 0)
+                and type == compressed_subheader_type
+        ):
+            index = SASIndex.data_subheader_index
+        return index
+
     def _process_meta_page(self):
         for i in range(self._meta_page.page_subheaders_count):
             pointer = self._get_pointer_page(index=i)
+            if not pointer.length:
+                continue
+
+            if pointer.compression != truncated_subheader_id:
+                subheader_signature = self._read_byte.read(
+                    pointer.offset,
+                    self._length,
+                    cache=self._cache,
+                )
+
+                subheader_index = self._get_subheader_class(
+                    subheader_signature, pointer.compression, pointer.type
+                )
 
     def _start_meta_page(self):
         self._read_meta_page()
