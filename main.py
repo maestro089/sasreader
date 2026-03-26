@@ -22,6 +22,14 @@ class SASProperties:
     header_size = None
     page_bit_offset = page_bit_offset_x86
     compression = None
+    row_length = None
+    row_count = None
+    col_count_p1 = None
+    col_count_p2 = None
+    mix_page_row_count = None
+    lcp = None
+    lcs = None
+    column_count = None
 
     def __str__(self):
         return f"""
@@ -39,8 +47,24 @@ class SASProperties:
                 header_size(HL): {self.header_size}
                 page_bit_offset: {self.page_bit_offset}
                 compression: {self.compression}
+                row_length: {self.row_length}
+                row_count: {self.row_count}
+                col_count_p1: {self.col_count_p1}
+                col_count_p2: {self.col_count_p2}
+                mix_page_row_count: {self.mix_page_row_count}
+                lcp: {self.lcp}
+                lcs: {self.lcs}
+                column_count: {self.column_count}
                """
 
+@dataclass
+class Column:
+    col_id: int = None
+    name: str = None
+    label: str = None
+    format: str = None
+    length: int = None
+    type: int = None
 
 class ConvertByte:
     def __init__(self, properties: SASProperties):
@@ -195,6 +219,12 @@ class SasReadMetaPage:
     def __init__(self, byte_file, properties: SASProperties):
         self._byte_file = byte_file
         self.properties = properties
+        self.column_names_strings = []
+        self.column_names = []
+        self.column_data_offsets = []
+        self.column_data_lengths = []
+        self.column_types = []
+        self.columns = []
         self._length = None
         self._subheader_pointer_length = None
         self._page_bit_offset = self.properties.page_bit_offset
@@ -271,6 +301,248 @@ class SasReadMetaPage:
             index = SASIndex.data_subheader_index
         return index
 
+    def _row_size_subheader(self, offset) -> None:
+        lcs = offset + (682 if self.properties.u64 else 354)
+        lcp = offset + (706 if self.properties.u64 else 378)
+
+        self.properties.row_length = self._read_byte.read(
+            offset + row_length_offset_multiplier * self._length,
+            self._length,
+            fmt="i",
+            cache=self._cache,
+        )
+
+        self.properties.row_count = self._read_byte.read(
+            offset + row_count_offset_multiplier * self._length,
+            self._length,
+            fmt="i",
+            cache=self._cache,
+        )
+
+        self.properties.col_count_p1 = self._read_byte.read(
+            offset + col_count_p1_multiplier * self._length,
+            self._length,
+            fmt="i",
+            cache=self._cache,
+        )
+
+        self.properties.col_count_p2 = self._read_byte.read(
+            offset + col_count_p2_multiplier * self._length,
+            self._length,
+            fmt="i",
+            cache=self._cache,
+        )
+
+        self.properties.mix_page_row_count = self._read_byte.read(
+            offset + row_count_on_mix_page_offset_multiplier * self._length,
+            self._length,
+            fmt="i",
+            cache=self._cache,
+        )
+        self.properties.lcs = self._read_byte.read(
+            lcs, 2, fmt="h", cache=self._cache
+        )
+        self.properties.lcp = self._read_byte.read(
+            lcp, 2, fmt="h", cache=self._cache
+        )
+
+    def _column_size_subheader(self, offset) -> None:
+        self.properties.column_count = self._read_byte.read(
+            offset + self._length,
+            self._length,
+            fmt="i",
+            cache=self._cache,
+        )
+
+        if (
+            self.properties.col_count_p1 + self.properties.col_count_p2
+            != self.properties.column_count
+        ):
+            print("Error: col_count_p1 + col_count_p2 != column_count")
+
+    def _column_text_subheader(self, offset) -> None:
+        text_block_size = self._read_byte.read(
+            offset + self._length,
+            text_block_size_length,
+            fmt="h",
+            cache=self._cache,
+        )
+
+        vals = self._read_byte.read(
+            offset + self._length,
+            text_block_size,
+            cache=self._cache,
+        )
+
+        if len(vals) > 0:
+            for cl in compression_literals:
+                if cl in vals:
+                    self.properties.compression = cl
+                    break
+        self.column_names_strings.append(vals)
+
+    def _column_name_subheader(self, offset) -> None:
+
+        for i in range(self.properties.col_count_p1):
+            text_subheader = (
+                    offset
+                    + self._length
+                    + column_name_pointer_length * (i + 1)
+                    + column_name_text_subheader_offset
+            )
+            col_name_offset = (
+                    offset
+                    + self._length
+                    + column_name_pointer_length * (i + 1)
+                    + column_name_offset_offset
+            )
+            col_name_length = (
+                    offset
+                    + self._length
+                    + column_name_pointer_length * (i + 1)
+                    + column_name_length_offset
+            )
+
+            idx = self._read_byte.read(
+                text_subheader,
+                column_name_text_subheader_length,
+                fmt="h",
+                cache=self._cache,
+            )
+            col_offset = self._read_byte.read(
+                col_name_offset,
+                column_name_offset_length,
+                fmt="h",
+                cache=self._cache,
+            )
+            col_len = self._read_byte.read(
+                col_name_length,
+                column_name_length_length,
+                fmt="h",
+                cache=self._cache,
+            )
+            name = self.column_names_strings[idx]
+            self.column_names.append(name[col_offset: col_offset + col_len])
+
+    def _column_attributes_subheader(self, offset, length) -> None:
+        column_attributes_vectors_count = (length - 2 * self._length - 12) // (
+                self._length + 8
+        )
+
+        for i in range(column_attributes_vectors_count):
+            col_data_offset = (
+                    offset
+                    + self._length
+                    + column_data_offset_offset
+                    + i * (self._length + 8)
+            )
+            col_data_len = (
+                    offset
+                    + 2 * self._length
+                    + column_data_length_offset
+                    + i * (self._length + 8)
+            )
+            col_types = (
+                    offset
+                    + 2 * self._length
+                    + column_type_offset
+                    + i * (self._length + 8)
+            )
+
+            self.column_data_offsets.append(
+                self._read_byte.read(
+                    col_data_offset,
+                    self._length,
+                    fmt="i",
+                    cache=self._cache,
+                )
+            )
+
+            self.column_data_lengths.append(
+                self._read_byte.read(
+                    col_data_len,
+                    column_data_length_length,
+                    fmt="i",
+                    cache=self._cache,
+                )
+            )
+
+            ctype = self._read_byte.read(
+                col_types,
+                column_type_length,
+                fmt="b",
+                cache=self._cache,
+            )
+            self.column_types.append("number" if ctype == 1 else "string")
+
+    def _format_and_label_subheader(self, offset) -> None:
+
+        text_subheader_format = self._read_byte.read(
+            offset + column_format_text_subheader_index_offset + 3 * self._length,
+            column_format_text_subheader_index_length,
+            fmt="h",
+            cache=self._cache,
+        )
+
+        format_idx = min(
+            text_subheader_format, len(self.column_names_strings) - 1
+        )
+
+        format_start = self._read_byte.read(
+            offset + column_format_offset_offset + 3 * self._length,
+            column_format_offset_length,
+            fmt="h",
+            cache=self._cache,
+        )
+
+        format_len = self._read_byte.read(
+            offset + column_format_length_offset + 3 * self._length,
+            column_format_length_length,
+            fmt="h",
+            cache=self._cache,
+        )
+
+        text_subheader_label = self._read_byte.read(
+            offset + column_label_text_subheader_index_offset + 3 * self._length,
+            column_label_text_subheader_index_length,
+            fmt="h",
+            cache=self._cache,
+        )
+
+        label_idx = min(text_subheader_label, len(self.column_names_strings) - 1)
+
+        label_start = self._read_byte.read(
+            offset + column_label_offset_offset + 3 * self._length,
+            column_label_offset_length,
+            fmt="h",
+            cache=self._cache,
+        )
+
+        label_len = self._read_byte.read(
+            offset + column_label_length_offset + 3 * self._length,
+            column_label_length_length,
+            fmt="h",
+            cache=self._cache,
+        )
+
+        label_names = self.column_names_strings[label_idx]
+        column_label = label_names[label_start: label_start + label_len]
+        format_names = self.column_names_strings[format_idx]
+        column_format = format_names[format_start: format_start + format_len]
+
+        current_column_number = len(self.columns)
+
+        self.columns.append(
+            Column(
+                col_id=current_column_number,
+                name=self.column_names[current_column_number],
+                label=column_label,
+                format=column_format,
+                type=self.column_types[current_column_number],
+                length=self.column_data_lengths[current_column_number],
+            )
+        )
+
     def _process_meta_page(self):
         for i in range(self._meta_page.page_subheaders_count):
             pointer = self._get_pointer_page(index=i)
@@ -287,6 +559,24 @@ class SasReadMetaPage:
                 subheader_index = self._get_subheader_class(
                     subheader_signature, pointer.compression, pointer.type
                 )
+                if subheader_index is not None:
+                    match subheader_index:
+                        case SASIndex.row_size_index:
+                            self._row_size_subheader(pointer.offset)
+                        case SASIndex.column_size_index:
+                            self._column_size_subheader(pointer.offset)
+                        case SASIndex.column_text_index:
+                            self._column_text_subheader(pointer.offset)
+                        case SASIndex.column_name_index:
+                            self._column_name_subheader(pointer.offset)
+                        case SASIndex.column_attributes_index:
+                            self._column_attributes_subheader(
+                                pointer.offset, pointer.length
+                            )
+                        case SASIndex.format_and_label_index:
+                            self._format_and_label_subheader(pointer.offset)
+                        case _:
+                            continue
 
     def _start_meta_page(self):
         self._read_meta_page()
@@ -312,7 +602,7 @@ class SasReader:
         self.header = SasReadHeaderFile(
             byte_file=self._byte_file, properties=self.metadata_file
         )
-        SasReadMetaPage(byte_file=self._byte_file, properties=self.metadata_file)
+        self.test2 = SasReadMetaPage(byte_file=self._byte_file, properties=self.metadata_file)
 
     @staticmethod
     def _read_sas7bdat(path: str):
@@ -321,8 +611,8 @@ class SasReader:
         return result
 
     def test(self):
+        print(self.test2.columns[0])
         return self.header.properties
-
 
 res = SasReader(path="test.sas7bdat").test()
 
