@@ -57,6 +57,7 @@ class SASProperties:
                 column_count: {self.column_count}
                """
 
+
 @dataclass
 class Column:
     col_id: int = None
@@ -65,6 +66,7 @@ class Column:
     format: str = None
     length: int = None
     type: int = None
+
 
 class ConvertByte:
     def __init__(self, properties: SASProperties):
@@ -293,10 +295,10 @@ class SasReadMetaPage:
     def _get_subheader_class(self, signature, compression, type):
         index = subheader_signature_to_index.get(signature)
         if (
-                self.properties.compression is not None
-                and index is None
-                and (compression == compressed_subheader_id or compression == 0)
-                and type == compressed_subheader_type
+            self.properties.compression is not None
+            and index is None
+            and (compression == compressed_subheader_id or compression == 0)
+            and type == compressed_subheader_type
         ):
             index = SASIndex.data_subheader_index
         return index
@@ -339,12 +341,8 @@ class SasReadMetaPage:
             fmt="i",
             cache=self._cache,
         )
-        self.properties.lcs = self._read_byte.read(
-            lcs, 2, fmt="h", cache=self._cache
-        )
-        self.properties.lcp = self._read_byte.read(
-            lcp, 2, fmt="h", cache=self._cache
-        )
+        self.properties.lcs = self._read_byte.read(lcs, 2, fmt="h", cache=self._cache)
+        self.properties.lcp = self._read_byte.read(lcp, 2, fmt="h", cache=self._cache)
 
     def _column_size_subheader(self, offset) -> None:
         self.properties.column_count = self._read_byte.read(
@@ -385,22 +383,22 @@ class SasReadMetaPage:
 
         for i in range(self.properties.col_count_p1):
             text_subheader = (
-                    offset
-                    + self._length
-                    + column_name_pointer_length * (i + 1)
-                    + column_name_text_subheader_offset
+                offset
+                + self._length
+                + column_name_pointer_length * (i + 1)
+                + column_name_text_subheader_offset
             )
             col_name_offset = (
-                    offset
-                    + self._length
-                    + column_name_pointer_length * (i + 1)
-                    + column_name_offset_offset
+                offset
+                + self._length
+                + column_name_pointer_length * (i + 1)
+                + column_name_offset_offset
             )
             col_name_length = (
-                    offset
-                    + self._length
-                    + column_name_pointer_length * (i + 1)
-                    + column_name_length_offset
+                offset
+                + self._length
+                + column_name_pointer_length * (i + 1)
+                + column_name_length_offset
             )
 
             idx = self._read_byte.read(
@@ -422,31 +420,28 @@ class SasReadMetaPage:
                 cache=self._cache,
             )
             name = self.column_names_strings[idx]
-            self.column_names.append(name[col_offset: col_offset + col_len])
+            self.column_names.append(name[col_offset : col_offset + col_len])
 
     def _column_attributes_subheader(self, offset, length) -> None:
         column_attributes_vectors_count = (length - 2 * self._length - 12) // (
-                self._length + 8
+            self._length + 8
         )
 
         for i in range(column_attributes_vectors_count):
             col_data_offset = (
-                    offset
-                    + self._length
-                    + column_data_offset_offset
-                    + i * (self._length + 8)
+                offset
+                + self._length
+                + column_data_offset_offset
+                + i * (self._length + 8)
             )
             col_data_len = (
-                    offset
-                    + 2 * self._length
-                    + column_data_length_offset
-                    + i * (self._length + 8)
+                offset
+                + 2 * self._length
+                + column_data_length_offset
+                + i * (self._length + 8)
             )
             col_types = (
-                    offset
-                    + 2 * self._length
-                    + column_type_offset
-                    + i * (self._length + 8)
+                offset + 2 * self._length + column_type_offset + i * (self._length + 8)
             )
 
             self.column_data_offsets.append(
@@ -484,9 +479,7 @@ class SasReadMetaPage:
             cache=self._cache,
         )
 
-        format_idx = min(
-            text_subheader_format, len(self.column_names_strings) - 1
-        )
+        format_idx = min(text_subheader_format, len(self.column_names_strings) - 1)
 
         format_start = self._read_byte.read(
             offset + column_format_offset_offset + 3 * self._length,
@@ -526,9 +519,9 @@ class SasReadMetaPage:
         )
 
         label_names = self.column_names_strings[label_idx]
-        column_label = label_names[label_start: label_start + label_len]
+        column_label = label_names[label_start : label_start + label_len]
         format_names = self.column_names_strings[format_idx]
-        column_format = format_names[format_start: format_start + format_len]
+        column_format = format_names[format_start : format_start + format_len]
 
         current_column_number = len(self.columns)
 
@@ -602,7 +595,9 @@ class SasReader:
         self.header = SasReadHeaderFile(
             byte_file=self._byte_file, properties=self.metadata_file
         )
-        self.test2 = SasReadMetaPage(byte_file=self._byte_file, properties=self.metadata_file)
+        self.test2 = SasReadMetaPage(
+            byte_file=self._byte_file, properties=self.metadata_file
+        )
 
     @staticmethod
     def _read_sas7bdat(path: str):
@@ -613,6 +608,7 @@ class SasReader:
     def test(self):
         print(self.test2.columns[0])
         return self.header.properties
+
 
 res = SasReader(path="test.sas7bdat").test()
 
