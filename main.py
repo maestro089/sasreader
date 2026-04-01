@@ -7,6 +7,21 @@ import struct
 
 
 @dataclass
+class PointerPage:
+    offset: int = None
+    length: int = None
+    compression: str = None
+    type: str = None
+
+
+@dataclass
+class MetaPage:
+    page_type = None
+    page_block_count = None
+    page_subheaders_count = None
+
+
+@dataclass
 class SASProperties:
     align1 = 0
     align2 = 0
@@ -107,6 +122,7 @@ class ConvertByte:
             result = struct.unpack(_fmt, res_cache)[0]
         elif fmt == "b":
             result = struct.unpack(_fmt, res_cache)[0]
+
         else:
             result = res_cache
         return result
@@ -202,21 +218,6 @@ class SasReadHeaderFile:
         self.properties.header_size = val
 
 
-@dataclass
-class PointerPage:
-    offset: int = None
-    length: int = None
-    compression: str = None
-    type: str = None
-
-
-@dataclass
-class MetaPage:
-    page_type = None
-    page_block_count = None
-    page_subheaders_count = None
-
-
 class SasReadMetaPage:
     def __init__(self, byte_file, properties: SASProperties):
         self._byte_file = byte_file
@@ -226,6 +227,7 @@ class SasReadMetaPage:
         self.column_data_offsets = []
         self.column_data_lengths = []
         self.column_types = []
+        self.pointer_page = []
         self.columns = []
         self._length = None
         self._subheader_pointer_length = None
@@ -238,6 +240,15 @@ class SasReadMetaPage:
         self._meta_page_pointer = PointerPage()
         self._cache = None
         self._parse_metadata()
+
+    def get_subheader_pointer_length(self):
+        return self._subheader_pointer_length
+
+    def get_page_bit_offset(self):
+        return self._page_bit_offset
+
+    def get_metadata_pages(self):
+        return self._metadata_pages
 
     def _check_u64(self):
         self._length = 8 if self.properties.u64 else 4
@@ -266,6 +277,9 @@ class SasReadMetaPage:
             cache=self._cache,
             fmt="h",
         )
+        print(self._meta_page.page_subheaders_count)
+
+        self._metadata_pages.append(self._meta_page)
 
     def _get_pointer_page(self, index: int = None):
         total_offset = (
@@ -553,23 +567,26 @@ class SasReadMetaPage:
                     subheader_signature, pointer.compression, pointer.type
                 )
                 if subheader_index is not None:
-                    match subheader_index:
-                        case SASIndex.row_size_index:
-                            self._row_size_subheader(pointer.offset)
-                        case SASIndex.column_size_index:
-                            self._column_size_subheader(pointer.offset)
-                        case SASIndex.column_text_index:
-                            self._column_text_subheader(pointer.offset)
-                        case SASIndex.column_name_index:
-                            self._column_name_subheader(pointer.offset)
-                        case SASIndex.column_attributes_index:
-                            self._column_attributes_subheader(
-                                pointer.offset, pointer.length
-                            )
-                        case SASIndex.format_and_label_index:
-                            self._format_and_label_subheader(pointer.offset)
-                        case _:
-                            continue
+                    if subheader_index != SASIndex.data_subheader_index:
+                        match subheader_index:
+                            case SASIndex.row_size_index:
+                                self._row_size_subheader(pointer.offset)
+                            case SASIndex.column_size_index:
+                                self._column_size_subheader(pointer.offset)
+                            case SASIndex.column_text_index:
+                                self._column_text_subheader(pointer.offset)
+                            case SASIndex.column_name_index:
+                                self._column_name_subheader(pointer.offset)
+                            case SASIndex.column_attributes_index:
+                                self._column_attributes_subheader(
+                                    pointer.offset, pointer.length
+                                )
+                            case SASIndex.format_and_label_index:
+                                self._format_and_label_subheader(pointer.offset)
+                            case _:
+                                continue
+                    else:
+                        self.pointer_page.append(pointer)
 
     def _start_meta_page(self):
         self._read_meta_page()
@@ -577,7 +594,7 @@ class SasReadMetaPage:
             self._process_meta_page()
 
     def _parse_metadata(self):
-        for i in range(self.properties.page_count):
+        for i in range(1, self.properties.page_count):
             self._cache = self._read_byte.read(
                 self.properties.page_size * i,
                 self.properties.page_size,
@@ -595,9 +612,15 @@ class SasReader:
         self.header = SasReadHeaderFile(
             byte_file=self._byte_file, properties=self.metadata_file
         )
-        self.test2 = SasReadMetaPage(
+        self.meta_columns = SasReadMetaPage(
             byte_file=self._byte_file, properties=self.metadata_file
         )
+        self._read_byte = ConvertByte(properties=self.header.properties)
+
+        self._cache_page = None
+        self._current_page = None
+
+        self.read_lines()
 
     @staticmethod
     def _read_sas7bdat(path: str):
@@ -605,8 +628,69 @@ class SasReader:
             result = f.read()
         return result
 
+    def _data_subheader(self, offset, length):
+        row_elements = []
+        if (
+            self.header.properties.compression
+            and length < self.header.properties.row_length
+        ):
+            source = self._cache_page
+        else:
+            source = self._cache_page
+
+        for i in range(self.header.properties.column_count):
+            length = self.meta_columns.column_data_lengths[i]
+            if length == 0:
+                break
+
+            start = offset + self.meta_columns.column_data_offsets[i]
+            end = offset + self.meta_columns.column_data_offsets[i] + length
+            temp = source[start:end]
+            if self.meta_columns.columns[i].type == "number":
+                if self.meta_columns.column_data_lengths[i] <= 2:
+                    row_elements.append(
+                        self._read_byte.read(0, length, fmt="h", cache=temp)
+                    )
+                else:
+                    fmt = self.meta_columns.columns[i].format
+                    if not fmt:
+                        ...
+                    else:
+                        row_elements.append(
+                            self._read_byte.read(0, length, fmt="d", cache=temp)
+                        )
+
+            else:  # string
+                row_elements.append(
+                    self._read_byte.read(0, length, fmt="s", cache=temp)
+                ).decode(self.header.properties.encode, errors="replace")
+            return row_elements
+
+    def read_lines(self):
+        bit_offset = self.meta_columns.get_page_bit_offset
+        subheader_pointer_length = self.meta_columns.get_subheader_pointer_length()
+        row_count = self.header.properties.row_count
+        current_row_in_file_index = 0
+        current_row_on_page_index = 0
+
+        if self._cache_page is None:
+            self._cache_page = self._read_byte.read(
+                self.header.properties.header_size,
+                self.header.properties.page_size,
+                cache=self._byte_file,
+            )
+        for i in range(0, row_count):
+            current_row_in_file_index += 1
+            try:
+                current_page_type = self.meta_columns.get_metadata_pages()[i].page_type
+                pointer_page = self.meta_columns.pointer_page[i]
+                res = self._data_subheader(pointer_page.offset, pointer_page.length)
+                print(res)
+
+            except IndexError:
+                continue
+
     def test(self):
-        print(self.test2.columns[0])
         return self.header.properties
 
 
