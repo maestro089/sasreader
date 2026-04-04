@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import timedelta
+from copy import copy
 
 from constant import *
 
@@ -19,6 +20,8 @@ class MetaPage:
     page_type = None
     page_block_count = None
     page_subheaders_count = None
+    pointer = None
+    cache = None
 
 
 @dataclass
@@ -81,6 +84,128 @@ class Column:
     format: str = None
     length: int = None
     type: int = None
+
+
+class Decompressor(object):
+
+    def decompress_row(self, offset, length, result_length, page):
+        raise NotImplementedError
+
+    @staticmethod
+    def to_ord(int_or_str):
+        if isinstance(int_or_str, int):
+            return int_or_str
+        return ord(int_or_str)
+
+    @staticmethod
+    def to_chr(int_or_str):
+        if isinstance(int_or_str, (bytes, bytearray)):
+            return int_or_str
+        return bytes([int_or_str])
+
+
+class RLEDecompressor(Decompressor):
+    """
+    Decompresses data using the Run Length Encoding algorithm
+    """
+
+    def decompress_row(self, offset, length, result_length, page):
+        b = self.to_ord
+        c = self.to_chr
+        current_result_array_index = 0
+        result = []
+        i = 0
+        for j in range(length):
+            if i != j:
+                continue
+            control_byte = b(page[offset + i]) & 0xF0
+            end_of_first_byte = b(page[offset + i]) & 0x0F
+            if control_byte == 0x00:
+                if i != (length - 1):
+                    count_of_bytes_to_copy = (
+                        (b(page[offset + i + 1]) & 0xFF) + 64 + end_of_first_byte * 256
+                    )
+                    start = offset + i + 2
+                    end = start + count_of_bytes_to_copy
+                    result.append(c(page[start:end]))
+                    i += count_of_bytes_to_copy + 1
+                    current_result_array_index += count_of_bytes_to_copy
+            elif control_byte == 0x40:
+                copy_counter = end_of_first_byte * 16 + (b(page[offset + i + 1]) & 0xFF)
+                for _ in range(copy_counter + 18):
+                    result.append(c(page[offset + i + 2]))
+                    current_result_array_index += 1
+                i += 2
+            elif control_byte == 0x60:
+                for _ in range(
+                    end_of_first_byte * 256 + (b(page[offset + i + 1]) & 0xFF) + 17
+                ):
+                    result.append(c(0x20))
+                    current_result_array_index += 1
+                i += 1
+            elif control_byte == 0x70:
+                for _ in range(
+                    end_of_first_byte * 256 + (b(page[offset + i + 1]) & 0xFF) + 17
+                ):
+                    result.append(c(0x00))
+                    current_result_array_index += 1
+                i += 1
+            elif control_byte == 0x80:
+                count_of_bytes_to_copy = min(end_of_first_byte + 1, length - (i + 1))
+                start = offset + i + 1
+                end = start + count_of_bytes_to_copy
+                result.append(c(page[start:end]))
+                i += count_of_bytes_to_copy
+                current_result_array_index += count_of_bytes_to_copy
+            elif control_byte == 0x90:
+                count_of_bytes_to_copy = min(end_of_first_byte + 17, length - (i + 1))
+                start = offset + i + 1
+                end = start + count_of_bytes_to_copy
+                result.append(c(page[start:end]))
+                i += count_of_bytes_to_copy
+                current_result_array_index += count_of_bytes_to_copy
+            elif control_byte == 0xA0:
+                count_of_bytes_to_copy = min(end_of_first_byte + 33, length - (i + 1))
+                start = offset + i + 1
+                end = start + count_of_bytes_to_copy
+                result.append(c(page[start:end]))
+                i += count_of_bytes_to_copy
+                current_result_array_index += count_of_bytes_to_copy
+            elif control_byte == 0xB0:
+                count_of_bytes_to_copy = min(end_of_first_byte + 49, length - (i + 1))
+                start = offset + i + 1
+                end = start + count_of_bytes_to_copy
+                result.append(c(page[start:end]))
+                i += count_of_bytes_to_copy
+                current_result_array_index += count_of_bytes_to_copy
+            elif control_byte == 0xC0:
+                for _ in range(end_of_first_byte + 3):
+                    result.append(c(page[offset + i + 1]))
+                    current_result_array_index += 1
+                i += 1
+            elif control_byte == 0xD0:
+                for _ in range(end_of_first_byte + 2):
+                    result.append(c(0x40))
+                    current_result_array_index += 1
+            elif control_byte == 0xE0:
+                for _ in range(end_of_first_byte + 2):
+                    result.append(c(0x20))
+                    current_result_array_index += 1
+            elif control_byte == 0xF0:
+                for _ in range(end_of_first_byte + 2):
+                    result.append(c(0x00))
+                    current_result_array_index += 1
+            # else:
+            #     self.parent.logger.error('unknown control byte: %s',
+            #                              control_byte)
+            i += 1
+
+        result = b"".join(result)
+        # if len(result) != result_length:
+        #     self.parent.logger.error('unexpected result length: %d != %d' %
+        #                              (len(result), result_length))
+
+        return result
 
 
 class ConvertByte:
@@ -247,7 +372,7 @@ class SasReadMetaPage:
     def get_page_bit_offset(self):
         return self._page_bit_offset
 
-    def get_metadata_pages(self):
+    def get_metadata_pages(self) -> list:
         return self._metadata_pages
 
     def _check_u64(self):
@@ -277,9 +402,8 @@ class SasReadMetaPage:
             cache=self._cache,
             fmt="h",
         )
-        print(self._meta_page.page_subheaders_count)
 
-        self._metadata_pages.append(self._meta_page)
+        # self._metadata_pages.append(val)
 
     def _get_pointer_page(self, index: int = None):
         total_offset = (
@@ -586,7 +710,16 @@ class SasReadMetaPage:
                             case _:
                                 continue
                     else:
-                        self.pointer_page.append(pointer)
+
+                        val = copy(pointer)
+                        self.pointer_page.append(val)
+
+        self._meta_page.pointer = copy(self.pointer_page)
+        self.pointer_page = []
+        self._meta_page.cache = self._cache
+
+        self._metadata_pages.append(copy(self._meta_page))
+
 
     def _start_meta_page(self):
         self._read_meta_page()
@@ -594,14 +727,13 @@ class SasReadMetaPage:
             self._process_meta_page()
 
     def _parse_metadata(self):
-        for i in range(1, self.properties.page_count):
+        for i in range(0, self.properties.page_count + 1):
             self._cache = self._read_byte.read(
                 self.properties.page_size * i,
                 self.properties.page_size,
                 cache=self._byte_file,
             )
             self._start_meta_page()
-
 
 class SasReader:
     def __init__(self, path: str):
@@ -634,7 +766,14 @@ class SasReader:
             self.header.properties.compression
             and length < self.header.properties.row_length
         ):
-            source = self._cache_page
+            t = RLEDecompressor()
+            source = t.decompress_row(
+                offset=offset,
+                length=length,
+                result_length=self.header.properties.row_length,
+                page=self._cache_page,
+            )
+            offset = 0
         else:
             source = self._cache_page
 
@@ -661,34 +800,15 @@ class SasReader:
                         )
 
             else:  # string
-                row_elements.append(
-                    self._read_byte.read(0, length, fmt="s", cache=temp)
-                ).decode(self.header.properties.encode, errors="replace")
+                ...
             return row_elements
 
     def read_lines(self):
-        bit_offset = self.meta_columns.get_page_bit_offset
-        subheader_pointer_length = self.meta_columns.get_subheader_pointer_length()
-        row_count = self.header.properties.row_count
-        current_row_in_file_index = 0
-        current_row_on_page_index = 0
-
-        if self._cache_page is None:
-            self._cache_page = self._read_byte.read(
-                self.header.properties.header_size,
-                self.header.properties.page_size,
-                cache=self._byte_file,
-            )
-        for i in range(0, row_count):
-            current_row_in_file_index += 1
-            try:
-                current_page_type = self.meta_columns.get_metadata_pages()[i].page_type
-                pointer_page = self.meta_columns.pointer_page[i]
-                res = self._data_subheader(pointer_page.offset, pointer_page.length)
+        for page in self.meta_columns.get_metadata_pages():
+            self._cache_page = page.cache
+            for pointer in page.pointer:
+                res = self._data_subheader(pointer.offset, pointer.length)
                 print(res)
-
-            except IndexError:
-                continue
 
     def test(self):
         return self.header.properties
