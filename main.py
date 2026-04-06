@@ -222,7 +222,7 @@ class ConvertByte:
         cache: bytes = None,
     ) -> bytes | float | int:
 
-        res_cache = cache[offset + align1 : offset + length + align2]
+        res_cache = cache[offset + align1: offset + length + align2]
 
         _fmt = fmt
 
@@ -237,10 +237,17 @@ class ConvertByte:
             _fmt = ">{}".format(_fmt)
 
         if fmt == "d":
+            if length < 8:
+                if self._properties.endianness == "little":
+                    res_cache = b''.join([b'\x00' * (8 - length), res_cache])
+                else:
+                    res_cache += b'\x00' * (8 - length)
+
             result = struct.unpack(str(_fmt), res_cache)[0]
         elif fmt == "s":
             val = res_cache.strip(b"\x00")
-            result = struct.unpack(_fmt, val)[0].decode()
+            val = struct.unpack(_fmt, val)[0].decode()
+            result = val.strip()
         elif fmt == "i":
             result = struct.unpack(_fmt, res_cache)[0]
         elif fmt == "h":
@@ -293,7 +300,7 @@ class SasReadHeaderFile:
         val = self._read_byte.read(
             encoding_offset, encoding_length, cache=cache, fmt="b"
         )
-        self.properties.encode = encoding_names[val]
+        self.properties.encode = encoding_names[val] if val in encoding_names else "utf-8"
 
         val = self._read_byte.read(
             date_created_offset + self.properties.align1,
@@ -402,8 +409,6 @@ class SasReadMetaPage:
             cache=self._cache,
             fmt="h",
         )
-
-        # self._metadata_pages.append(val)
 
     def _get_pointer_page(self, index: int = None):
         total_offset = (
@@ -727,7 +732,7 @@ class SasReadMetaPage:
             self._process_meta_page()
 
     def _parse_metadata(self):
-        for i in range(0, self.properties.page_count + 1):
+        for i in range(1, self.properties.page_count + 1):
             self._cache = self._read_byte.read(
                 self.properties.page_size * i,
                 self.properties.page_size,
@@ -793,28 +798,54 @@ class SasReader:
                 else:
                     fmt = self.meta_columns.columns[i].format
                     if not fmt:
-                        ...
+                        row_elements.append(
+                            self._read_byte.read(0, length, fmt="d", cache=temp)
+                        )
                     else:
                         row_elements.append(
                             self._read_byte.read(0, length, fmt="d", cache=temp)
                         )
 
             else:  # string
-                ...
-            return row_elements
+                row_elements.append(
+                    self._read_byte.read(0, length, fmt="s", cache=temp)
+                )
+        return row_elements
 
     def read_lines(self):
+        l = []
         for page in self.meta_columns.get_metadata_pages():
             self._cache_page = page.cache
-            for pointer in page.pointer:
-                res = self._data_subheader(pointer.offset, pointer.length)
-                print(res)
+            if page.page_type == page_meta_type:
+                for pointer in page.pointer:
+                    row = self._data_subheader(pointer.offset, pointer.length)
+
+                    l.append(row)
+            elif page.page_type in page_mix_type:
+                for i in range(1, self.header.properties.mix_page_row_count):
+                    align_correction = (
+                           self.meta_columns.get_page_bit_offset() + subheader_pointers_offset +
+                           page.page_subheaders_count *
+                           self.meta_columns.get_subheader_pointer_length()
+                   ) % 8
+
+                    offset = (
+                            self.meta_columns.get_page_bit_offset() + subheader_pointers_offset +
+                            align_correction + page.page_subheaders_count *
+                            self.meta_columns.get_subheader_pointer_length() + i *
+                            self.header.properties.row_length
+                    )
+
+                    row = self._data_subheader(offset, self.header.properties.row_length)
+                    l.append(row)
+        print(len(l))
 
     def test(self):
         return self.header.properties
 
 
-res = SasReader(path="test.sas7bdat").test()
+# res = SasReader(path="../noairflow/cars.sas7bdat").test()
+res = SasReader(path="../noairflow/cars.sas7bdat").test()
 
 print(res)
 
