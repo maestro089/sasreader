@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 from copy import copy
+from typing import Union
 
 from constant import *
 
@@ -97,12 +98,6 @@ class Decompressor(object):
             return int_or_str
         return ord(int_or_str)
 
-    @staticmethod
-    def to_chr(int_or_str):
-        if isinstance(int_or_str, (bytes, bytearray)):
-            return int_or_str
-        return bytes([int_or_str])
-
 
 class RLEDecompressor(Decompressor):
     """
@@ -111,101 +106,63 @@ class RLEDecompressor(Decompressor):
 
     def decompress_row(self, offset, length, result_length, page):
         b = self.to_ord
-        c = self.to_chr
-        current_result_array_index = 0
-        result = []
+        result = bytearray()
         i = 0
-        for j in range(length):
-            if i != j:
-                continue
-            control_byte = b(page[offset + i]) & 0xF0
-            end_of_first_byte = b(page[offset + i]) & 0x0F
+
+        while i < length:
+            current_byte = b(page[offset + i])
+            control_byte = current_byte & 0xF0
+            end_of_first_byte = current_byte & 0x0F
+
             if control_byte == 0x00:
-                if i != (length - 1):
+                if i != length - 1:
                     count_of_bytes_to_copy = (
                         (b(page[offset + i + 1]) & 0xFF) + 64 + end_of_first_byte * 256
                     )
                     start = offset + i + 2
                     end = start + count_of_bytes_to_copy
-                    result.append(c(page[start:end]))
-                    i += count_of_bytes_to_copy + 1
-                    current_result_array_index += count_of_bytes_to_copy
+                    result.extend(page[start:end])
+                    i += count_of_bytes_to_copy + 2
+
             elif control_byte == 0x40:
                 copy_counter = end_of_first_byte * 16 + (b(page[offset + i + 1]) & 0xFF)
-                for _ in range(copy_counter + 18):
-                    result.append(c(page[offset + i + 2]))
-                    current_result_array_index += 1
+                repeated_byte = page[offset + i + 2]
+                result.extend([repeated_byte] * (copy_counter + 18))
+                i += 3
+
+            elif control_byte in (0x60, 0x70):
+                count = end_of_first_byte * 256 + (b(page[offset + i + 1]) & 0xFF) + 17
+                fill_byte = 0x20 if control_byte == 0x60 else 0x00
+                result.extend([fill_byte] * count)
                 i += 2
-            elif control_byte == 0x60:
-                for _ in range(
-                    end_of_first_byte * 256 + (b(page[offset + i + 1]) & 0xFF) + 17
-                ):
-                    result.append(c(0x20))
-                    current_result_array_index += 1
-                i += 1
-            elif control_byte == 0x70:
-                for _ in range(
-                    end_of_first_byte * 256 + (b(page[offset + i + 1]) & 0xFF) + 17
-                ):
-                    result.append(c(0x00))
-                    current_result_array_index += 1
-                i += 1
-            elif control_byte == 0x80:
-                count_of_bytes_to_copy = min(end_of_first_byte + 1, length - (i + 1))
+
+            elif 0x80 <= control_byte <= 0xB0:
+                # Обработка диапазонов 0x80–0xB0 с разной базой
+                base_values = {0x80: 1, 0x90: 17, 0xA0: 33, 0xB0: 49}
+                base = base_values[control_byte]
+                count_of_bytes_to_copy = min(end_of_first_byte + base, length - (i + 1))
                 start = offset + i + 1
                 end = start + count_of_bytes_to_copy
-                result.append(c(page[start:end]))
-                i += count_of_bytes_to_copy
-                current_result_array_index += count_of_bytes_to_copy
-            elif control_byte == 0x90:
-                count_of_bytes_to_copy = min(end_of_first_byte + 17, length - (i + 1))
-                start = offset + i + 1
-                end = start + count_of_bytes_to_copy
-                result.append(c(page[start:end]))
-                i += count_of_bytes_to_copy
-                current_result_array_index += count_of_bytes_to_copy
-            elif control_byte == 0xA0:
-                count_of_bytes_to_copy = min(end_of_first_byte + 33, length - (i + 1))
-                start = offset + i + 1
-                end = start + count_of_bytes_to_copy
-                result.append(c(page[start:end]))
-                i += count_of_bytes_to_copy
-                current_result_array_index += count_of_bytes_to_copy
-            elif control_byte == 0xB0:
-                count_of_bytes_to_copy = min(end_of_first_byte + 49, length - (i + 1))
-                start = offset + i + 1
-                end = start + count_of_bytes_to_copy
-                result.append(c(page[start:end]))
-                i += count_of_bytes_to_copy
-                current_result_array_index += count_of_bytes_to_copy
+                result.extend(page[start:end])
+                i += count_of_bytes_to_copy + 1
+
             elif control_byte == 0xC0:
-                for _ in range(end_of_first_byte + 3):
-                    result.append(c(page[offset + i + 1]))
-                    current_result_array_index += 1
+                repeated_byte = page[offset + i + 1]
+                result.extend([repeated_byte] * (end_of_first_byte + 3))
+                i += 2  # +2: байт управления и байт значения
+
+            elif control_byte in (0xD0, 0xE0, 0xF0):
+                # Обработка заполнителей с разными значениями
+                fill_values = {0xD0: 0x40, 0xE0: 0x20, 0xF0: 0x00}
+                fill_byte = fill_values[control_byte]
+                result.extend([fill_byte] * (end_of_first_byte + 2))
                 i += 1
-            elif control_byte == 0xD0:
-                for _ in range(end_of_first_byte + 2):
-                    result.append(c(0x40))
-                    current_result_array_index += 1
-            elif control_byte == 0xE0:
-                for _ in range(end_of_first_byte + 2):
-                    result.append(c(0x20))
-                    current_result_array_index += 1
-            elif control_byte == 0xF0:
-                for _ in range(end_of_first_byte + 2):
-                    result.append(c(0x00))
-                    current_result_array_index += 1
-            # else:
-            #     self.parent.logger.error('unknown control byte: %s',
-            #                              control_byte)
-            i += 1
 
-        result = b"".join(result)
-        # if len(result) != result_length:
-        #     self.parent.logger.error('unexpected result length: %d != %d' %
-        #                              (len(result), result_length))
+            else:
+                # Неизвестный control_byte — пропускаем байт
+                i += 1
 
-        return result
+        return bytes(result)
 
 
 class ConvertByte:
@@ -222,7 +179,7 @@ class ConvertByte:
         cache: bytes = None,
     ) -> bytes | float | int:
 
-        res_cache = cache[offset + align1: offset + length + align2]
+        res_cache = cache[offset + align1 : offset + length + align2]
 
         _fmt = fmt
 
@@ -239,9 +196,9 @@ class ConvertByte:
         if fmt == "d":
             if length < 8:
                 if self._properties.endianness == "little":
-                    res_cache = b''.join([b'\x00' * (8 - length), res_cache])
+                    res_cache = b"".join([b"\x00" * (8 - length), res_cache])
                 else:
-                    res_cache += b'\x00' * (8 - length)
+                    res_cache += b"\x00" * (8 - length)
 
             result = struct.unpack(str(_fmt), res_cache)[0]
         elif fmt == "s":
@@ -300,7 +257,9 @@ class SasReadHeaderFile:
         val = self._read_byte.read(
             encoding_offset, encoding_length, cache=cache, fmt="b"
         )
-        self.properties.encode = encoding_names[val] if val in encoding_names else "utf-8"
+        self.properties.encode = (
+            encoding_names[val] if val in encoding_names else "utf-8"
+        )
 
         val = self._read_byte.read(
             date_created_offset + self.properties.align1,
@@ -681,43 +640,44 @@ class SasReadMetaPage:
 
     def _process_meta_page(self):
         for i in range(self._meta_page.page_subheaders_count):
-            pointer = self._get_pointer_page(index=i)
-            if not pointer.length:
-                continue
+            if self._meta_page.page_type in page_meta_mix_amd:
+                pointer = self._get_pointer_page(index=i)
+                if not pointer.length:
+                    continue
 
-            if pointer.compression != truncated_subheader_id:
-                subheader_signature = self._read_byte.read(
-                    pointer.offset,
-                    self._length,
-                    cache=self._cache,
-                )
+                if pointer.compression != truncated_subheader_id:
+                    subheader_signature = self._read_byte.read(
+                        pointer.offset,
+                        self._length,
+                        cache=self._cache,
+                    )
 
-                subheader_index = self._get_subheader_class(
-                    subheader_signature, pointer.compression, pointer.type
-                )
-                if subheader_index is not None:
-                    if subheader_index != SASIndex.data_subheader_index:
-                        match subheader_index:
-                            case SASIndex.row_size_index:
-                                self._row_size_subheader(pointer.offset)
-                            case SASIndex.column_size_index:
-                                self._column_size_subheader(pointer.offset)
-                            case SASIndex.column_text_index:
-                                self._column_text_subheader(pointer.offset)
-                            case SASIndex.column_name_index:
-                                self._column_name_subheader(pointer.offset)
-                            case SASIndex.column_attributes_index:
-                                self._column_attributes_subheader(
-                                    pointer.offset, pointer.length
-                                )
-                            case SASIndex.format_and_label_index:
-                                self._format_and_label_subheader(pointer.offset)
-                            case _:
-                                continue
-                    else:
+                    subheader_index = self._get_subheader_class(
+                        subheader_signature, pointer.compression, pointer.type
+                    )
+                    if subheader_index is not None:
+                        if subheader_index != SASIndex.data_subheader_index:
+                            match subheader_index:
+                                case SASIndex.row_size_index:
+                                    self._row_size_subheader(pointer.offset)
+                                case SASIndex.column_size_index:
+                                    self._column_size_subheader(pointer.offset)
+                                case SASIndex.column_text_index:
+                                    self._column_text_subheader(pointer.offset)
+                                case SASIndex.column_name_index:
+                                    self._column_name_subheader(pointer.offset)
+                                case SASIndex.column_attributes_index:
+                                    self._column_attributes_subheader(
+                                        pointer.offset, pointer.length
+                                    )
+                                case SASIndex.format_and_label_index:
+                                    self._format_and_label_subheader(pointer.offset)
+                                case _:
+                                    continue
+                        else:
 
-                        val = copy(pointer)
-                        self.pointer_page.append(val)
+                            val = copy(pointer)
+                            self.pointer_page.append(val)
 
         self._meta_page.pointer = copy(self.pointer_page)
         self.pointer_page = []
@@ -725,11 +685,9 @@ class SasReadMetaPage:
 
         self._metadata_pages.append(copy(self._meta_page))
 
-
     def _start_meta_page(self):
         self._read_meta_page()
-        if self._meta_page.page_type in page_meta_mix_amd:
-            self._process_meta_page()
+        self._process_meta_page()
 
     def _parse_metadata(self):
         for i in range(1, self.properties.page_count + 1):
@@ -739,6 +697,7 @@ class SasReadMetaPage:
                 cache=self._byte_file,
             )
             self._start_meta_page()
+
 
 class SasReader:
     def __init__(self, path: str):
@@ -766,114 +725,132 @@ class SasReader:
         return result
 
     def _data_subheader(self, offset, length):
-        row_elements = []
-        if (
-            self.header.properties.compression
-            and length < self.header.properties.row_length
-        ):
-            t = RLEDecompressor()
-            source = t.decompress_row(
+        # Кэшируем часто используемые атрибуты
+        header_props = self.header.properties
+        meta_columns = self.meta_columns
+        column_count = header_props.column_count
+        column_data_lengths = meta_columns.column_data_lengths
+        column_data_offsets = meta_columns.column_data_offsets
+        columns = meta_columns.columns
+
+        # Определяем источник данных
+        if header_props.compression and length < header_props.row_length:
+            decompressor = RLEDecompressor()
+            source = decompressor.decompress_row(
                 offset=offset,
                 length=length,
-                result_length=self.header.properties.row_length,
+                result_length=header_props.row_length,
                 page=self._cache_page,
             )
             offset = 0
         else:
             source = self._cache_page
 
-        for i in range(self.header.properties.column_count):
-            length = self.meta_columns.column_data_lengths[i]
-            if length == 0:
-                break
+        row_elements = []
 
-            start = offset + self.meta_columns.column_data_offsets[i]
-            end = offset + self.meta_columns.column_data_offsets[i] + length
+        # Предварительно вычисляем все диапазоны для ускорения доступа
+        ranges = [
+            (
+                offset + column_data_offsets[i],
+                offset + column_data_offsets[i] + column_data_lengths[i],
+            )
+            for i in range(column_count)
+            if column_data_lengths[i] > 0
+        ]
+
+        for i, (start, end) in enumerate(ranges):
             temp = source[start:end]
-            if self.meta_columns.columns[i].type == "number":
-                if self.meta_columns.column_data_lengths[i] <= 2:
-                    row_elements.append(
-                        self._read_byte.read(0, length, fmt="h", cache=temp)
+            column = columns[i]
+
+            if column.type == "number":
+                # Унифицированная обработка числовых данных
+                if column_data_lengths[i] <= 2:
+                    value = self._read_byte.read(
+                        0, column_data_lengths[i], fmt="h", cache=temp
                     )
                 else:
-                    fmt = self.meta_columns.columns[i].format
-                    if not fmt:
-                        row_elements.append(
-                            self._read_byte.read(0, length, fmt="d", cache=temp)
-                        )
-                    else:
-                        row_elements.append(
-                            self._read_byte.read(0, length, fmt="d", cache=temp)
-                        )
-
+                    # Всегда используем формат 'd' для чисел > 2 байт
+                    value = self._read_byte.read(
+                        0, column_data_lengths[i], fmt="d", cache=temp
+                    )
             else:  # string
-                row_elements.append(
-                    self._read_byte.read(0, length, fmt="s", cache=temp)
+                value = self._read_byte.read(
+                    0, column_data_lengths[i], fmt="s", cache=temp
                 )
+
+            row_elements.append(value)
+
         return row_elements
 
+    def _calculate_row_offset(self, page, i, is_mixed=False):
+        """Вычисляет смещение для i‑й строки на странице."""
+        meta_columns = self.meta_columns
+        base_offset = (
+            meta_columns.get_page_bit_offset()
+            + subheader_pointers_offset
+            + page.page_subheaders_count * meta_columns.get_subheader_pointer_length()
+        )
+
+        if is_mixed:
+            align_correction = base_offset % 8
+            base_offset += align_correction
+
+        return base_offset + i * self.header.properties.row_length
+
     def read_lines(self):
-        l = []
         for page in self.meta_columns.get_metadata_pages():
             self._cache_page = page.cache
+
             if page.page_type == page_meta_type:
                 for pointer in page.pointer:
                     row = self._data_subheader(pointer.offset, pointer.length)
-
-                    l.append(row)
+                    yield row
             elif page.page_type in page_mix_type:
-                for i in range(1, self.header.properties.mix_page_row_count):
+                for i in range(0, page.page_block_count - page.page_subheaders_count):
                     align_correction = (
-                           self.meta_columns.get_page_bit_offset() + subheader_pointers_offset +
-                           page.page_subheaders_count *
-                           self.meta_columns.get_subheader_pointer_length()
-                   ) % 8
+                        self.meta_columns.get_page_bit_offset()
+                        + subheader_pointers_offset
+                        + page.page_subheaders_count
+                        * self.meta_columns.get_subheader_pointer_length()
+                    ) % 8
 
                     offset = (
-                            self.meta_columns.get_page_bit_offset() + subheader_pointers_offset +
-                            align_correction + page.page_subheaders_count *
-                            self.meta_columns.get_subheader_pointer_length() + i *
-                            self.header.properties.row_length
+                        self.meta_columns.get_page_bit_offset()
+                        + subheader_pointers_offset
+                        + align_correction
+                        + page.page_subheaders_count
+                        * self.meta_columns.get_subheader_pointer_length()
+                        + i * self.header.properties.row_length
                     )
 
-                    row = self._data_subheader(offset, self.header.properties.row_length)
-                    l.append(row)
-        print(len(l))
+                    row = self._data_subheader(
+                        offset, self.header.properties.row_length
+                    )
+                    yield row
+            elif page.page_type == page_data_type:
+                for i in range(0, page.page_block_count - page.page_subheaders_count):
+                    row = self._data_subheader(
+                        self.meta_columns.get_page_bit_offset()
+                        + subheader_pointers_offset
+                        + i * self.header.properties.row_length,
+                        self.header.properties.row_length,
+                    )
+                    yield row
 
     def test(self):
         return self.header.properties
 
 
-# res = SasReader(path="../noairflow/cars.sas7bdat").test()
-res = SasReader(path="../noairflow/cars.sas7bdat").test()
-
-print(res)
+# res = SasReader(path="../noairflow/gss2024.sas7bdat")
+res = SasReader(path="../noairflow/cars.sas7bdat")
 
 
-# Header:
-# 	col_count_p1: 813
-# 	col_count_p2: 0
-# 	column_count: 813
-# 	compression: SASYZCRL
-# 	creator: None
-# 	creator_proc: DATASTEP
-# 	date_created: 2025-11-10 22:00:27.372000
-# 	date_modified: 2025-11-10 22:00:27.372000
-# 	endianess: little
-# 	file_type: DATA
-# 	filename: gss2024.sas7bdat
-# 	header_length: 65536
-# 	lcp: 8
-# 	lcs: 0
-# 	mix_page_row_count: 3
-# 	name:
-# 	os_name:
-# 	os_type:
-# 	page_count: 140
-# 	page_length: 65536
-# 	platform: windows
-# 	row_count: 3309
-# 	row_length: 3308
-# 	sas_release: 9.0401M7
-# 	server_type: X64_SRV19
-# 	u64: False
+def test():
+    k = []
+    for i in res.read_lines():
+        print(i)
+
+
+import cProfile
+
+cProfile.run("test()")
