@@ -183,7 +183,7 @@ class ConvertByte:
 
         _fmt = fmt
 
-        if fmt == "i" and self._properties.u64:
+        if fmt == "i" and self._properties.u64 and length == 8:
             _fmt = "q"
         elif fmt == "s":
             _fmt = "{}s".format(min(length, len(res_cache)))
@@ -690,9 +690,9 @@ class SasReadMetaPage:
         self._process_meta_page()
 
     def _parse_metadata(self):
-        for i in range(1, self.properties.page_count + 1):
+        for i in range(0, self.properties.page_count):
             self._cache = self._read_byte.read(
-                self.properties.page_size * i,
+                self.properties.header_size + self.properties.page_size * i,
                 self.properties.page_size,
                 cache=self._byte_file,
             )
@@ -841,16 +841,22 @@ class SasReader:
         return self.header.properties
 
 
-# res = SasReader(path="../noairflow/gss2024.sas7bdat")
-res = SasReader(path="../noairflow/cars.sas7bdat")
+res = SasReader(path="../noairflow/gss2024.sas7bdat")
+# res = SasReader(path="../noairflow/cars.sas7bdat")
+# res = SasReader(path="../noairflow/accident.sas7bdat")
 
 
 def test():
     k = []
     for i in res.read_lines():
         print(i)
+        k.append(i)
+
+print(res.test())
+
+test()
 
 
-import cProfile
-
-cProfile.run("test()")
+# import cProfile
+#
+# cProfile.run("test()")
